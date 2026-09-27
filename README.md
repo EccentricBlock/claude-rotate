@@ -404,6 +404,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `devices{}` | `name → device key`; key is what the device puts in `CLAUDE_CODE_OAUTH_TOKEN` |
 | `accounts[].priority` | lower = preferred; accounts form tiers, backup tiers only used when every preferred account is spent (default 100) |
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
+| `accounts[].private_to` | a device name: the account is served *only* to that device (its owner rides the shared pool first and rotates onto it when that is spent); every other device never touches it. See "Preferring one account over another". |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
 | `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
 | `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
@@ -487,7 +488,7 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
 
 ### Preferring one account over another
 
-Three levels of control, from lazy to pro — all in the same `config.json`,
+Four levels of control, from lazy to pro — all in the same `config.json`,
 deliberately **no separate rules file** (see design note below):
 
 **Level 0 — do nothing.** The defaults (consume-first + thresholds + cooldown)
@@ -522,13 +523,27 @@ Combine with `strategy` for the remaining temperament choice: `consume-first`
 `most-weekly-left` (always ride the account with the most weekly quota left) or
 `weekly-pace` (spend the quota likeliest to expire, keeping a fresh session in reserve).
 
+**Level 3 — pin an account to a device.** `"private_to": "<device name>"` marks
+an account as belonging to one device: it is served *only* to that device. The
+owner still rides the shared pool first and rotates onto their private account
+when the shared pool is spent (it's their reserve); every other device is never
+routed to it. The device name must be a registered device in `devices{}`. Each
+device keeps its own current account (`device_accounts` in `state.json`), so one
+device's switch never moves another's. Set it in `config.json`, or with the CLI:
+
+```sh
+./setup.sh add-account max-20x --private-to kamal-mbp
+```
+
+This is what you reach for when someone joins with their own subscription and
+you don't want the rest of the pool quietly burning their weekly quota.
+
 **Design note — why no rules YAML:** a rules engine (per-model routes,
-time-of-day windows, per-device pinning) would add a parser, a second config
-file, and an ordering semantics to a one-file tool, and every use case we've
-actually hit decomposes into the four knobs above (strategy, priority,
-disabled, thresholds). If a real need appears that doesn't decompose — say
-per-device account pinning — add it as another plain field on the existing
-config objects, not as a DSL.
+time-of-day windows, and the like) would add a parser, a second config file,
+and an ordering semantics to a one-file tool, and every use case we've
+actually hit decomposes into the knobs above (strategy, priority, disabled,
+private_to, thresholds). If a real need appears that doesn't decompose, add it
+as another plain field on the existing config objects, not as a DSL.
 
 ## Run as a service
 

@@ -447,6 +447,43 @@ def usable(name: str) -> bool:
     return under_threshold(name) or reserve_spendable(name)
 
 
+def private_to(name: str) -> str | None:
+    """Device name this account is reserved for, or None if every device may use it."""
+    return ACCOUNTS[name].get("private_to")
+
+
+def available_to(name: str, device: str | None) -> bool:
+    """A shared account (no private_to) serves any device; a private one serves
+    only its owner. device=None means no scoping: everything is available (the
+    device-less rotation logic and the offline tests)."""
+    owner = private_to(name)
+    return owner is None or device is None or owner == device
+
+
+def device_current(device: str | None) -> str | None:
+    """The account a device is riding. device=None is the global active_account.
+    A named device has its own pointer, so a private account can pin one device
+    while every other device keeps rotating through the shared pool. A device
+    with no pointer yet inherits the global active account if it may use it,
+    otherwise it takes its own best pick, so it never starts on someone else's
+    private account."""
+    if not device:
+        return STATE.get("active_account")
+    pointed = STATE.get("device_accounts", {}).get(device)
+    if pointed:
+        return pointed
+    active = STATE.get("active_account")
+    if active in ACCOUNTS and available_to(active, device):
+        return active
+    return pick_account(device)
+
+
+def set_device_current(device: str | None, account: str) -> None:
+    STATE["active_account"] = account  # doubles as the display value
+    if device:
+        STATE.setdefault("device_accounts", {})[device] = account
+
+
 def weekly_reset(name: str) -> float:
     return STATE["accounts"].get(name, {}).get("reset_7d") or float("inf")
 
@@ -484,9 +521,12 @@ def earliest_relief() -> float:
     return min(resets) if resets else now + 300
 
 
-def pick_account() -> str | None:
+def pick_account(device: str | None = None) -> str | None:
     """Usable = not disabled, both windows under their thresholds (a passed
-    reset counts as 0). Priority tiers come first: a lower `priority` account
+    reset counts as 0), and available to this device: a private account is only
+    a candidate for the device it is reserved for, in every tier below, so a
+    device with nothing else left gets None rather than another's private
+    account. Priority tiers come first: a lower `priority` account
     always beats a higher one, and the strategy orders accounts *within* a tier.
 
     consume-first (default): burn the usable account whose weekly window resets
@@ -506,7 +546,8 @@ def pick_account() -> str | None:
     5h reset doesn't help it. An account over its weekly_cap allowance ranks
     after every account that is not.
     """
-    under = [n for n in ACCOUNTS if usable(n)]
+    mine = [n for n in ACCOUNTS if available_to(n, device)]
+    under = [n for n in mine if usable(n)]
     if under:
         if STRATEGY == "consume-first":
             key = lambda n: (weekly_reset(n), utilization(n))
@@ -521,20 +562,21 @@ def pick_account() -> str | None:
             priority(n),
             (0, binding_reset(n)) if reserve_spendable(n) else (1, 0),
             key(n)))
-    reserve = [n for n in ACCOUNTS if hard_ok(n)]
+    reserve = [n for n in mine if hard_ok(n)]
     if reserve:
         return min(reserve, key=lambda n: (on_probation(n), priority(n), binding_reset(n)))
-    pool = ([n for n in ACCOUNTS if not disabled(n) and not account_bad(n)]
-            or [n for n in ACCOUNTS if not disabled(n)])
+    pool = ([n for n in mine if not disabled(n) and not account_bad(n)]
+            or [n for n in mine if not disabled(n)])
     if not pool:
         return None
     return min(pool, key=lambda n: (not cap_ok(n), relief_ts(n), priority(n)))
 
 
-def record_switch(frm: str, to: str, reason: str, now: float) -> None:
-    """Make `to` the active account and log the switch event. Caller holds
-    state_lock and saves state."""
-    STATE["active_account"] = to
+def record_switch(frm: str, to: str, reason: str, now: float,
+                  device: str | None = None) -> None:
+    """Make `to` the active account (for `device`, when given) and log the
+    switch event. Caller holds state_lock and saves state."""
+    set_device_current(device, to)
     STATE["last_switch_ts"] = now
     STATE["events"].append({
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -547,8 +589,9 @@ def record_switch(frm: str, to: str, reason: str, now: float) -> None:
 
 
 async def note_response(account: str, headers: httpx.Headers, status: int,
-                        bad: bool = False) -> str | None:
+                        bad: bool = False, device: str | None = None) -> str | None:
     """Update account state from unified rate-limit headers; maybe switch.
+    device: whose pointer a switch moves, and whose pool it may pick from.
 
     bad: True when this account is a closed/free account (403/404 on messages)
     — it is marked unusable and a hard switch away is forced, so the very next
@@ -607,13 +650,13 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
             return "burst"
 
         verdict = None
-        if STATE["active_account"] != account:
+        if device_current(device) != account:
             # Another request already rotated; a retry rides the new active.
             verdict = "switched" if quota_hit else None
         else:
             cooled = now - STATE.get("last_switch_ts", 0) >= COOLDOWN_S
             over = not usable(account)  # expiring reserve is being spent on purpose
-            nxt = pick_account()
+            nxt = pick_account(device)
             reason = None
             if nxt is not None and nxt != account:
                 if bad:
@@ -672,7 +715,7 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
                         # switches above may always use the reserve.
                         reason = "weekly_pace"
             if reason:
-                record_switch(account, nxt, reason, now)
+                record_switch(account, nxt, reason, now, device)
                 verdict = "switched"
             elif quota_hit:
                 verdict = "exhausted"
@@ -1506,18 +1549,19 @@ def method_is_messages(url: str) -> bool:
     return url.split("?", 1)[0].rstrip("/") == "/v1/messages"
 
 
-def pick_working() -> str | None:
+def pick_working(device: str | None = None) -> str | None:
     """The best account that can actually serve right now, or None if none.
     Distinguishes 'a dead account and at least one other works' (return the good
     one) from 'every account is dead' (None) — so the next request isn't fired
     at a closed/free account when a working one is idle."""
-    ok = [n for n in ACCOUNTS if hard_ok(n)]
+    ok = [n for n in ACCOUNTS if hard_ok(n) and available_to(n, device)]
     if not ok:
         return None
     return min(ok, key=lambda n: (on_probation(n), priority(n), binding_reset(n)))
 
 
-async def revert_refusals(refused: dict, start: str, status: int) -> None:
+async def revert_refusals(refused: dict, start: str, status: int,
+                          device: str | None = None) -> None:
     """A request ended refused, and every previously healthy account it was
     tried on refused it with the same 403/404: that is the request's fault
     (unknown model name, a header the API rejects), not the accounts'. Undo the
@@ -1533,8 +1577,9 @@ async def revert_refusals(refused: dict, start: str, status: int) -> None:
                 else:
                     info[k] = prior[k]
         now = time.time()
-        if STATE["active_account"] != start:
-            record_switch(STATE["active_account"], start, "request_refused_revert", now)
+        if device_current(device) != start:
+            record_switch(device_current(device), start, "request_refused_revert", now,
+                          device)
         STATE["events"].append({
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "type": "refusal",
             "from": start, "to": start,
@@ -1545,9 +1590,9 @@ async def revert_refusals(refused: dict, start: str, status: int) -> None:
 
 
 async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
-                        request: Request | None = None):
+                        request: Request | None = None, device: str | None = None):
     """The rotation loop shared by the transparent proxy and the OpenAI endpoint:
-    pick the active account, pace bursts, retry through switches, optionally hold
+    pick the device's active account, pace bursts, retry through switches, optionally hold
     until the soonest window reset. Returns (upstream, account, retries, noted,
     verdict) — noted means note_response already ran for the returned response;
     verdict is note_response's word for the LAST 429 seen ("burst" / "switched" /
@@ -1556,27 +1601,27 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
     retries = 0
     noted = False
     verdict = None
-    start = STATE["active_account"]
+    start = device_current(device)
     # Accounts that were clean (not on probation) before this request and then
     # refused it: name -> (their bad-mark fields before, the refusal status).
     refused: dict = {}
     while True:
         await retry_wait(0, request)
-        account = STATE.get("active_account")
-        if account not in ACCOUNTS or disabled(account):
-            account = pick_account()
+        account = device_current(device)
+        if account not in ACCOUNTS or disabled(account) or not available_to(account, device):
+            account = pick_account(device)
             if account is None:
                 raise HTTPException(status_code=503, detail="no enabled accounts")
-            STATE["active_account"] = account
+            set_device_current(device, account)
             save_state()
         # Never fire a request at an account we already know is a closed/free
         # dead-end when a working account is available — leave before sending.
         if account_bad(account):
             async with state_lock:
-                good = pick_working()
-                if good is not None and good != STATE["active_account"]:
-                    record_switch(STATE["active_account"], good, "account_unusable",
-                                  time.time())
+                good = pick_working(device)
+                if good is not None and good != device_current(device):
+                    record_switch(device_current(device), good, "account_unusable",
+                                  time.time(), device)
                     save_state()
                     account = good
         fwd_headers["authorization"] = f"Bearer {ACCOUNTS[account]['token']}"
@@ -1595,7 +1640,8 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
         if bad and account not in refused and not on_probation(account):
             info = STATE["accounts"].get(account, {})
             refused[account] = ({k: info.get(k) for k in BAD_KEYS}, note_status)
-        verdict = await note_response(account, upstream.headers, note_status, bad=bad)
+        verdict = await note_response(account, upstream.headers, note_status, bad=bad,
+                                      device=device)
         wait = 0.0
         retry = verdict in ("switched", "burst") and retries < 5
         if (not retry and bad and refused
@@ -1604,7 +1650,7 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
             # it refused it the same way: the request is at fault, so don't
             # leave those accounts marked dead.
             await revert_refusals({n: p for n, (p, _) in refused.items()}, start,
-                                  next(iter(refused.values()))[1])
+                                  next(iter(refused.values()))[1], device)
         # Holding only makes sense for spent quota (429), not for refusals.
         if not retry and verdict == "exhausted" and hold_deadline and not bad:
             # Every account is spent: hold the request open until the soonest
@@ -1652,7 +1698,7 @@ async def openai_chat(request: Request):
     fwd = {"content-type": "application/json", "accept-encoding": "identity",
            "anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20"}
     upstream, account, retries, noted, verdict = await send_upstream(
-        "POST", "/v1/messages", fwd, json.dumps(abody).encode(), request)
+        "POST", "/v1/messages", fwd, json.dumps(abody).encode(), request, device)
 
     rec = {"device": device, "account": account, "path": "/v1/chat/completions", "method": "POST",
            "model": abody.get("model"), "status": upstream.status_code}
@@ -1694,14 +1740,16 @@ async def openai_chat(request: Request):
                 rec["util_5h"] = upstream.headers.get(
                     "anthropic-ratelimit-unified-5h-utilization")
                 audit(rec)
-                await note_response(account, upstream.headers, upstream.status_code)
+                await note_response(account, upstream.headers, upstream.status_code,
+                                    device=device)
 
         return StreamingResponse(relay(), status_code=200, headers=resp_headers,
                                  media_type="text/event-stream")
 
     content = await bounded_response(upstream)
     if not noted:
-        await note_response(account, upstream.headers, upstream.status_code)
+        await note_response(account, upstream.headers, upstream.status_code,
+                                    device=device)
     rec["util_5h"] = upstream.headers.get("anthropic-ratelimit-unified-5h-utilization")
     if upstream.status_code != 200:
         try:
@@ -1753,7 +1801,7 @@ async def proxy(request: Request, path: str):
                      if unquote_plus(part.partition("=")[0]) != "key")
     url = "/" + path + ("?" + query if query else "")
     upstream, account, retries, noted, _verdict = await send_upstream(
-        request.method, url, fwd_headers, body, request)
+        request.method, url, fwd_headers, body, request, device)
 
     rec = {"device": device, "account": account, "path": "/" + path, "method": request.method,
            "model": model, "status": upstream.status_code}
@@ -1776,7 +1824,8 @@ async def proxy(request: Request, path: str):
                 rec["usage"] = summarize_usage(usage_acc)
                 rec["util_5h"] = upstream.headers.get("anthropic-ratelimit-unified-5h-utilization")
                 audit(rec)
-                await note_response(account, upstream.headers, upstream.status_code)
+                await note_response(account, upstream.headers, upstream.status_code,
+                                    device=device)
 
         return StreamingResponse(relay(), status_code=upstream.status_code,
                                  headers=resp_headers,
@@ -1790,7 +1839,8 @@ async def proxy(request: Request, path: str):
     rec["util_5h"] = upstream.headers.get("anthropic-ratelimit-unified-5h-utilization")
     audit(rec)
     if not noted:
-        await note_response(account, upstream.headers, upstream.status_code)
+        await note_response(account, upstream.headers, upstream.status_code,
+                                    device=device)
     return Response(content=content, status_code=upstream.status_code, headers=resp_headers)
 
 

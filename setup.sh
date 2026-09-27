@@ -5,6 +5,7 @@
 #   ./setup.sh                       first-time init (creates config.json, dirs)
 #   ./setup.sh add-device <name>     mint a device key and register it
 #   ./setup.sh add-account <name>    store a `claude setup-token` for an account
+#                                    (--private-to <device> reserves it for one device)
 #   ./setup.sh onboard <user> <dev>  team flow: mint <user>-<dev> key, restart the
 #                                    service, print a paste-ready welcome block
 #                                    (uses config.json "public_url" when set)
@@ -21,9 +22,20 @@ validate_name() {
 # Validate all caller-provided labels before creating or changing any files.
 case "${1:-init}" in
 init) ;;
-add-device|add-account)
-    name="${2:?usage: ./setup.sh $1 <name>}"
+add-device)
+    name="${2:?usage: ./setup.sh add-device <name>}"
     validate_name "$name"
+    ;;
+add-account)
+    name="${2:?usage: ./setup.sh add-account <name> [--private-to <device>]}"
+    validate_name "$name"
+    priv=""
+    if [ "${3:-}" = "--private-to" ]; then
+        priv="${4:?missing device name after --private-to}"
+        validate_name "$priv"
+    elif [ -n "${3:-}" ]; then
+        echo "error: unknown option: $3" >&2; exit 1
+    fi
     ;;
 onboard)
     user="${2:?usage: ./setup.sh onboard <username> <device>}"
@@ -109,6 +121,10 @@ onboard)
     echo "──────────────────────────────────────────────────────────────"
     ;;
 add-account)
+    if [ -n "$priv" ] && ! python3 -c "import json,sys; sys.exit(0 if sys.argv[1] in json.load(open('config.json')).get('devices', {}) else 1)" "$priv"; then
+        echo "error: device '$priv' is not registered — add it first (./setup.sh add-device $priv)" >&2
+        exit 1
+    fi
     echo "Run 'claude setup-token' in a browser session logged into that account,"
     read -r -s -p "then paste the sk-ant-oat01-... token here (input hidden): " token
     echo
@@ -116,14 +132,25 @@ add-account)
     if [ -e "tokens/${name}.token" ]; then chmod 600 "tokens/${name}.token"; fi
     printf '%s' "$token" > "tokens/${name}.token"
     chmod 600 "tokens/${name}.token"
-    python3 - "$name" <<'EOF'
+    python3 - "$name" "$priv" <<'EOF'
 import json, sys
+name, priv = sys.argv[1], sys.argv[2]
 cfg = json.load(open("config.json"))
-if not any(a["name"] == sys.argv[1] for a in cfg["accounts"]):
-    cfg["accounts"].append({"name": sys.argv[1], "token_file": f"tokens/{sys.argv[1]}.token"})
+acct = next((a for a in cfg["accounts"] if a["name"] == name), None)
+if acct is None:
+    acct = {"name": name, "token_file": f"tokens/{name}.token"}
+    cfg["accounts"].append(acct)
+if priv:
+    acct["private_to"] = priv
+else:
+    acct.pop("private_to", None)
 json.dump(cfg, open("config.json", "w"), indent=2)
 EOF
-    echo "account '$name' stored. Restart rotator.py to load it."
+    if [ -n "$priv" ]; then
+        echo "account '$name' stored (private to device '$priv'). Restart rotator.py to load it."
+    else
+        echo "account '$name' stored. Restart rotator.py to load it."
+    fi
     ;;
 *)
     echo "unknown subcommand: $1" >&2; exit 1 ;;
