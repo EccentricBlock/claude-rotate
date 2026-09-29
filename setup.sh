@@ -142,6 +142,7 @@ if acct is None:
     cfg["accounts"].append(acct)
 if priv:
     acct["private_to"] = priv
+    acct["priority"] = 1  # private accounts are top-tier for their owner
 else:
     acct.pop("private_to", None)
 json.dump(cfg, open("config.json", "w"), indent=2)
