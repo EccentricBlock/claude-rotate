@@ -1005,20 +1005,20 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <style>
  :root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;
   --border:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--track:#0d366b;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b}
- *{box-sizing:border-box} body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+ *{box-sizing:border-box} body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%;text-size-adjust:100%}
  main{max-width:1180px;margin:0 auto;padding:20px 24px 40px;display:grid;gap:16px}
  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap} h1{font-size:18px;margin:0;font-weight:600}
  .pill{border:1px solid var(--border);border-radius:999px;padding:2px 10px;color:var(--ink2);font-size:13px}
  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
  .spacer{flex:1} .muted{color:var(--muted)} .small{font-size:12px}
- .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto}
+ .card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto}
  .card h2{font-size:13px;font-weight:600;color:var(--ink2);margin:0 0 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
  .banner{display:flex;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);color:var(--ink2);margin-bottom:8px}
  .banner.warn{border-color:rgba(250,178,25,.35);background:rgba(250,178,25,.06)} .banner.warn b{color:var(--warn)}
  .kpis{display:grid;grid-template-columns:1.6fr repeat(4,1fr);gap:16px}
  .hero .v{font-size:48px;font-weight:600;line-height:1.1;margin:4px 0} .label{color:var(--ink2);font-size:13px}
  .tile .v{font-size:26px;font-weight:600;margin:6px 0 2px}
- .accounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}
+ .accounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr));gap:16px}
  .acct-head{display:flex;align-items:baseline;gap:8px;margin-bottom:12px;flex-wrap:wrap} .acct-head b{font-size:16px}
  .badge{font-size:12px;border-radius:999px;padding:1px 8px;border:1px solid var(--border);color:var(--ink2)}
  .meter-row{display:grid;grid-template-columns:28px 1fr 250px;gap:10px;align-items:center;margin:8px 0}
@@ -1027,8 +1027,8 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink2);font-weight:400;margin-left:auto}
  .key{display:inline-block;width:16px;border-top:2px solid;vertical-align:4px;margin-right:6px}
  .key.dash{border-top-style:dashed} .key.band{height:10px;border:0;vertical-align:-1px;background:rgba(208,59,59,.3)}
- #weekly{position:relative} svg text{fill:var(--muted);font-size:11px;font-family:inherit}
- .tip{position:absolute;pointer-events:none;background:#262624;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;min-width:170px;display:none;top:20px}
+ #weekly svg{touch-action:pan-y} svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+ .tip{position:absolute;pointer-events:none;background:#262624;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;min-width:170px;display:none}
  .tip .row{display:flex;justify-content:space-between;gap:12px} .tip .v{color:var(--ink);font-weight:600}
  .sentence{margin-top:8px;color:var(--ink2)}
  table{border-collapse:collapse;width:100%} th,td{padding:8px 10px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -1039,7 +1039,14 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
  .split{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
  .timeline div{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--grid);color:var(--ink2)} .timeline div:last-child{border-bottom:0}
  .linkbtn{background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink2);font:inherit;font-size:12px;padding:2px 8px;cursor:pointer}
- @media (max-width:900px){.kpis,.split{grid-template-columns:1fr}.meter-row{grid-template-columns:28px 1fr}}
+ @media (max-width:900px){.kpis{grid-template-columns:1fr 1fr}.hero{grid-column:1/-1}.split{grid-template-columns:1fr}
+  .meter-row{grid-template-columns:28px 1fr;row-gap:4px}.meter-row>span:last-child{grid-column:2}
+  #devices,#devices tbody{display:block} #devices tr:first-child{display:none}
+  #devices tr{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 12px;padding:12px 0;border-bottom:1px solid var(--grid)} #devices tr:last-child{border-bottom:0}
+  #devices td{padding:0;border:0;text-align:left} #devices td:nth-child(n+4):not(:last-child){order:1}
+  #devices td[data-l]::before{content:attr(data-l);display:block;color:var(--muted);font-size:11px}}
+ @media (max-width:600px){main{padding:12px 12px 32px;gap:12px}.card{padding:14px}#devices tr{grid-template-columns:1fr 1fr}
+  th,td{padding:8px 6px} .split :is(th,td):nth-child(4){display:none}}
 </style></head><body><main>
 <header><h1>claude-rotate</h1><span class="muted" id="host"></span><span id="pills"></span><span class="spacer"></span><span class="muted small" id="upd"></span></header>
 <div id="alerts"></div>
@@ -1079,7 +1086,7 @@ function when(ts){return new Date(ts*1000).toLocaleString([],{weekday:'short',ho
 function day(ts){return new Date(ts*1000).toLocaleDateString([],{month:'short',day:'numeric'})}
 function dur(s){return s<5400?Math.round(s/60)+' min':s<2*D?(s/H).toFixed(s<10*H?1:0)+' h':(s/D).toFixed(1)+' d'}
 function ago(min){return min==null?'never':min<1?'just now':min<60?min+' min ago':(min/60).toFixed(1)+' h ago'}
-function cell(b){return b?`<td>${money(b.cost_usd)}<span class="sub">${fmt(tok(b))} tok &middot; ${fmt(b.requests)} req</span></td>`:'<td class="muted">&ndash;</td>'}
+function cell(b,l){return b?`<td data-l="${l}">${money(b.cost_usd)}<span class="sub">${fmt(tok(b))} tok &middot; ${fmt(b.requests)} req</span></td>`:`<td data-l="${l}" class="muted">&ndash;</td>`}
 function meter(label,u,thr,reset){
   const sev=u>=1?['var(--crit)',' &#10005; limit reached']:u>=thr?['var(--warn)',' &#9888; past switch point']:['var(--s1)',''];
   return `<div class="meter-row"><span class="muted">${label}</span><div class="meter"><i style="width:${Math.min(100,u*100)}%;background:${sev[0]}"></i><span class="tick" style="left:${thr*100}%"></span></div>`
@@ -1088,7 +1095,7 @@ function spark(v){if(!v||!v.length)return '';const w=96,h=24,m=Math.max(...v)||1
   return `<svg width="${w}" height="${h}"><polyline points="${v.map((x,i)=>(i/(v.length-1)*w).toFixed(1)+','+y(x)).join(' ')}" fill="none" stroke="var(--muted)" stroke-width="1.5"/><circle cx="${w}" cy="${y(v[v.length-1])}" r="3" fill="var(--s1)"/></svg>`}
 function weekly(p){
   if(!p||!p.series.length) return 'collecting data';
-  const W=1100,Hh=270,L=48,R=12,T=14,B=26, now=p.series[p.series.length-1][0], x0=now-14*D, x1=now+7*D;
+  const W=Math.max(300,$('weekly').clientWidth||1100),Hh=W<600?220:270,L=48,R=12,T=14,B=26,st=W<700?4:2, now=p.series[p.series.length-1][0], x0=now-14*D, x1=now+7*D;
   const all=p.series.concat(p.projection.slice(1)), last=p.series[p.series.length-1];
   const ymax=Math.ceil(Math.max(100,...all.map(q=>q[2]))*1.08/100)*100;
   const X=t=>L+(Math.max(t,x0)-x0)/(x1-x0)*(W-L-R), Y=v=>T+(1-v/ymax)*(Hh-T-B);
@@ -1103,8 +1110,8 @@ function weekly(p){
     if(hit&&from==null) from=q[0]; else if(!hit&&from!=null){s+=band(from,q[0]);from=null}}
   if(from!=null) s+=band(from,all[all.length-1][0]);
   for(let v=0;v<=ymax;v+=100) s+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v?'var(--grid)':'var(--axis)'}"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}%</text>`;
-  for(let t=Math.ceil(x0/D/2)*2*D;t<x1;t+=2*D) s+=`<text x="${X(t)}" y="${Hh-8}" text-anchor="middle">${esc(day(t))}</text>`;
-  s+=`<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity=".5"/><text x="${X(now)+4}" y="${T+10}">now</text><text x="${X(x1)-4}" y="${T+10}" text-anchor="end">projected</text>`
+  for(let t=Math.ceil(x0/D/st)*st*D;t<x1;t+=st*D) s+=`<text x="${X(t)}" y="${Hh-8}" text-anchor="middle">${esc(day(t))}</text>`;
+  s+=`<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity=".5"/><text x="${X(now)+4}" y="${T+10}">now</text>${W<600?'':`<text x="${X(x1)-4}" y="${T+10}" text-anchor="end">projected</text>`}`
     +`<path d="${path(p.series,1)}L${X(now)},${Y(0)}L${X(p.series[0][0])},${Y(0)}Z" fill="var(--s1)" opacity=".1"/>`
     +`<path d="${path(p.series,2)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round"/><path d="${path(p.series,1)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>`
     +`<path d="${path(p.projection,2)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-dasharray="6 5" opacity=".8"/><path d="${path(p.projection,1)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-dasharray="6 5" opacity=".8"/>`;
@@ -1116,7 +1123,7 @@ function sentence(p,now){
   const rate=p.rate_per_day==null?'':`At the current rate (${p.rate_per_day}% of a weekly quota per day), `;
   if(p.eta) return `<div class="sentence">${rate}every account ${p.eta<=now+60?'is at 100% now':'is spent at <b>'+esc(when(p.eta))+'</b>'}; quota returns at ${esc(when(p.back))} when ${esc(p.back_account)} resets.</div>`;
   return `<div class="sentence">${p.note?esc(p.note):rate+'no shortfall in the next 7 days.'}</div>`}
-$('weekly').onpointermove=e=>{
+$('weekly').onpointerdown=$('weekly').onpointermove=e=>{  // pointerdown: a tap on a touch screen
   const svg=e.currentTarget.querySelector('svg'); if(!svg||!WK) return;
   const r=svg.getBoundingClientRect(), t=WK.x0+((e.clientX-r.left)/r.width*WK.W-WK.L)/(WK.W-WK.L-WK.R)*(WK.x1-WK.x0);
   let q=WK.all[0]; for(const p of WK.all) if(Math.abs(p[0]-t)<Math.abs(q[0]-t)) q=p;
@@ -1128,8 +1135,11 @@ $('weekly').onpointermove=e=>{
     const row=document.createElement('div'), a=document.createElement('span'), b=document.createElement('span');
     row.className='row'; b.className='v'; b.textContent=Math.round(v)+'%';
     if(c){const key=document.createElement('span'); key.className='key'; key.style.borderColor=c; a.append(key)} a.append(k); row.append(a,b); tip.append(row)}
-  tip.style.display='block'; tip.style.left=Math.min(e.clientX-r.left+30,r.width-160)+'px'};
-$('weekly').onpointerleave=()=>{$('tip').style.display='none'; const xh=document.querySelector('#xh'); if(xh) xh.setAttribute('opacity','0')};
+  const c=e.currentTarget.parentNode.getBoundingClientRect(), px=e.clientX-c.left;
+  tip.style.display='block'; tip.style.top=(r.top-c.top+8)+'px';
+  tip.style.left=Math.max(8,px+16+tip.offsetWidth>c.width?px-16-tip.offsetWidth:px+16)+'px'};
+$('weekly').onpointerleave=e=>{if(e.pointerType==='touch') return;  // touch fires leave right after the tap
+  $('tip').style.display='none'; const xh=document.querySelector('#xh'); if(xh) xh.setAttribute('opacity','0')};
 $('tbl').onclick=()=>{showTable=!showTable; $('tbl').textContent=showTable?'Chart':'Table'; refresh()};
 $('period').onclick=e=>{const p=e.target.dataset&&e.target.dataset.p; if(p){period=p; refresh()}};
 async function refresh(){
@@ -1162,8 +1172,9 @@ async function refresh(){
   let dh=`<tr><th>Device</th><th class="l">Status</th><th class="l">Last model</th><th>24 h</th><th>7 d</th><th>30 d</th><th>All time${per.since?' <span class="muted">since '+esc(per.since)+'</span>':''}</th><th>30-day trend</th></tr>`;
   for(const name of Object.keys(roster).concat(gone)){const d=roster[name], removed=!d;
     const status=removed?'removed':d.online?'<span class="dot" style="background:var(--good)"></span>online':'<span class="dot" style="background:var(--muted)"></span>idle';
-    dh+=`<tr class="${removed?'removed':''}"><td><b>${esc(name)}</b>${d?'<span class="sub">key '+esc(d.key_suffix)+'</span>':''}</td><td class="l">${status}${d?'<span class="sub">'+ago(d.last_seen_min)+'</span>':''}</td><td class="l">${esc(d&&d.last_model||'–')}</td>`
-      +cell((stats.by_device||{})[name])+cell(((per['7d']||{}).device||{})[name])+cell(((per['30d']||{}).device||{})[name])+cell(((per.all||{}).device||{})[name])+`<td>${spark((per.trend||{})[name])}</td></tr>`}
+    dh+=`<tr class="${removed?'removed':''}"><td><b>${esc(name)}</b>${d?'<span class="sub">key '+esc(d.key_suffix)+'</span>':''}</td><td class="l">${status}${d?'<span class="sub">'+ago(d.last_seen_min)+'</span>':''}</td><td class="l" data-l="Last model">${esc(d&&d.last_model||'–')}</td>`
+      +cell((stats.by_device||{})[name],'24 h')+cell(((per['7d']||{}).device||{})[name],'7 d')+cell(((per['30d']||{}).device||{})[name],'30 d')
+      +cell(((per.all||{}).device||{})[name],'All time'+(per.since?' since '+esc(per.since):''))+`<td data-l="30-day trend">${spark((per.trend||{})[name])}</td></tr>`}
   $('devices').innerHTML=dh;
   // models over the chosen period; accounts over 24 h
   $('period').innerHTML=Object.keys(PERIODS).map(p=>`<button data-p="${p}" class="${p===period?'on':''}">${p}</button>`).join('');
