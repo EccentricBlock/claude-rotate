@@ -180,6 +180,41 @@ R.STATE["accounts"]["b"]["util_7d"] = 1.01
 check("fallback with every week spent picks soonest weekly reset", R.pick_account() == "c")
 R.STRATEGY = "consume-first"
 
+# 1k. doxaras/claude-rotate#3: a week-exhausted or rejected account with a
+# stale (passed) 5h reset must not win the fallback over the live account.
+def issue3(a_extra, b_extra, active="b"):
+    fresh_state(active)
+    R.STATE["accounts"] = {
+        "a": dict({"util_5h": 0.1, "util_7d": 1.0, "reset_5h": now - 3600,
+                   "reset_7d": now + 3 * 86400, "status": "rejected",
+                   "last_seen": now - 60}, **a_extra),
+        "b": dict({"util_5h": 0.85, "util_7d": 0.26, "reset_5h": now + 7200,
+                   "reset_7d": now + 5 * 86400, "status": "allowed",
+                   "last_seen": now - 10}, **b_extra),
+    }
+saved_accts = R.ACCOUNTS
+R.ACCOUNTS = {"a": {"name": "a"}, "b": {"name": "b"}}
+issue3({}, {})
+check("#3: week-exhausted a with stale 5h reset loses to b", R.pick_account() == "b")
+issue3({}, {"util_5h": 1.0, "status": "rejected"})
+check("#3: same with b rejected at 5h", R.pick_account() == "b")
+issue3({"util_7d": 0.99, "status": "allowed"}, {})
+check("#3: a in the weekly reserve band still loses to b", R.pick_account() == "b")
+issue3({"util_7d": 0.95}, {})
+check("#3: rejected a with stale 7d reading is not usable", R.pick_account() == "b")
+issue3({"util_7d": 0.95}, {"util_5h": 1.0, "status": "rejected"})
+check("#3: rejected a with stale 7d loses to b's sooner relief", R.pick_account() == "b")
+issue3({"util_7d": 0.99, "status": "allowed"}, {"util_5h": 1.0, "status": "rejected"})
+check("#3: a in the weekly reserve band is used when b is rejected",
+      R.pick_account() == "a")
+issue3({}, {"util_5h": 1.0, "util_7d": 1.0, "reset_7d": now + 6 * 86400,
+            "status": "rejected"})
+check("#3: both week-exhausted: sooner weekly reset wins", R.pick_account() == "a")
+issue3({}, {"util_5h": 1.0, "status": "rejected"})
+check("#3: earliest_relief skips the week-exhausted account's stale 5h reset",
+      abs(R.earliest_relief() - R.STATE["accounts"]["b"]["reset_5h"]) < 1)
+R.ACCOUNTS = saved_accts
+
 # 2. burst 429 (util well under 1.0, no rejected status) → pace, no rotation
 fresh_state("a")
 R.STATE["accounts"] = {"a": {"util_5h": 0.4, "util_7d": 0.2}}

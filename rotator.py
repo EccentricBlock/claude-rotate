@@ -341,7 +341,7 @@ def on_probation(name: str) -> bool:
 
 
 def under_threshold(name: str) -> bool:
-    return (not disabled(name) and not account_bad(name)
+    return (not disabled(name) and not account_bad(name) and not rejected(name)
             and utilization(name) < THRESHOLD and util_7d(name) < THRESHOLD_7D)
 
 
@@ -369,6 +369,20 @@ def binding_reset(name: str) -> float:
     room_7d = HARD_LIMIT - util_7d(name)
     key = "reset_5h" if room_5h <= room_7d else "reset_7d"
     return info.get(key) or float("inf")
+
+
+def relief_ts(name: str) -> float:
+    """When a blocked account can serve again: the latest reset among the windows
+    at the hard limit (a 5h reset doesn't help a week-exhausted account). A
+    rejected account whose stored utilisation reads lower falls back to its
+    soonest future reset. inf = unknown."""
+    info, now = STATE["accounts"].get(name, {}), time.time()
+    over = [k for k, u in (("reset_5h", utilization(name)), ("reset_7d", util_7d(name)))
+            if u >= HARD_LIMIT]
+    if over:
+        return max(info.get(k) or float("inf") for k in over)
+    future = [info[k] for k in ("reset_5h", "reset_7d") if info.get(k) and info[k] > now]
+    return min(future) if future else float("inf")
 
 
 def reserve_spendable(name: str) -> bool:
@@ -421,10 +435,10 @@ def can_fall_back_to(name: str) -> bool:
 
 
 def earliest_relief() -> float:
-    """Soonest moment any account's 5h window resets (for hold-until-reset)."""
+    """Soonest moment any account can serve again (for hold-until-reset)."""
     now = time.time()
-    resets = [i.get("reset_5h") for i in STATE["accounts"].values()
-              if i.get("reset_5h") and i["reset_5h"] > now]
+    resets = [relief_ts(n) for n in ACCOUNTS if not disabled(n)]
+    resets = [r for r in resets if now < r < float("inf")]
     return min(resets) if resets else now + 300
 
 
@@ -445,9 +459,9 @@ def pick_account() -> str | None:
     Emergency (nothing usable): the reserve band — any hard_ok account, the one
     whose binding window resets soonest, so traffic runs to the real limit
     instead of stopping at the thresholds.
-    If nothing is hard_ok: the non-disabled account whose 5h window resets
-    soonest, skipping week-exhausted accounts (a 5h reset doesn't help them);
-    if every account is week-exhausted, the one whose weekly window resets soonest.
+    If nothing is hard_ok: the non-disabled account that can serve again soonest
+    (relief_ts): a week-exhausted account counts from its weekly reset, since a
+    5h reset doesn't help it.
     """
     under = [n for n in ACCOUNTS if usable(n)]
     if under:
@@ -471,10 +485,7 @@ def pick_account() -> str | None:
             or [n for n in ACCOUNTS if not disabled(n)])
     if not pool:
         return None
-    week_ok = [n for n in pool if util_7d(n) < HARD_LIMIT]
-    if week_ok:
-        return min(week_ok, key=lambda n: STATE["accounts"].get(n, {}).get("reset_5h", 0))
-    return min(pool, key=weekly_reset)
+    return min(pool, key=lambda n: (relief_ts(n), priority(n)))
 
 
 def record_switch(frm: str, to: str, reason: str, now: float) -> None:

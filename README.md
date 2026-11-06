@@ -451,8 +451,10 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
   somewhere to rotate into. Forced switches (5h spent,
   quota rejected) can use the reserve. `/rotate/status` shows each account's
   `weekly_pace_pct_per_h` and `fresh_session`.
-- If nothing is usable, the proxy waits on the account whose 5h window resets
-  soonest, skipping week-exhausted accounts (a 5h reset can't help them).
+- If nothing is usable, the proxy waits on the account that can serve again
+  soonest. A week-exhausted account counts from its weekly reset (a 5h reset
+  can't help it), and an account whose last response was a quota rejection
+  isn't usable until a window has reset since.
 - A cooldown plus a hysteresis margin stop accounts ping-ponging at the
   threshold; a hard limit (quota actually rejected) always switches
   immediately.
@@ -785,6 +787,7 @@ Changes made in each fork since it diverged from its parent. Newest fork first.
 Based on clement-z `56ef19e`.
 
 - Merged [doxaras/claude-rotate#4](https://github.com/doxaras/claude-rotate/pull/4) (by Dave Marsden, 9 commits, authorship preserved): `most-weekly-left` and `weekly-pace` rotation strategies, a reserve band above the switch thresholds, and rotation off closed/free accounts (403/404 on `/v1/messages`) with backoff recovery.
+- Fixed [doxaras/claude-rotate#3](https://github.com/doxaras/claude-rotate/issues/3): the all-blocked fallback and the hold-until-reset wait rank accounts by when they can serve again, and a rejected account is never treated as usable on a stale reading.
 
 ### clement-z/claude-rotate
 
