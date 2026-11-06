@@ -52,8 +52,12 @@ private state/log directories, but cannot modify installed code or credentials.
   still forwards ordinary API headers and permits all upstream paths/methods.
   Treat a device key as permission to use the shared upstream identity.
 - Empty, non-string, duplicate, and public placeholder device keys fail startup.
-  Revoke a device by removing its entry from `config.json` and restarting.
-  Configuration is not hot-reloaded.
+  Revoke a device by removing its entry from `config.json`. The proxy reloads
+  the file within `reload_poll_s` seconds (default 5) or on `SIGHUP`, and new
+  requests with that key then get 401. A stream or held request the device
+  already has open finishes; restart the service to cut it off at once. An
+  invalid file is rejected and the old configuration, revoked key included,
+  keeps running, so check `config.error` in `/rotate/status` after an edit.
 - A disabled or removed active account is replaced before the next request is
   sent. If every account is disabled, requests return 503 without using a token.
   Already-running requests are not revoked by editing configuration.

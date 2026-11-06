@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import sys
 import time
 from collections import deque
@@ -60,9 +61,14 @@ PRIVATE_HEADERS = {"cookie", "referer", "origin", "forwarded", "x-real-ip"}
 
 @asynccontextmanager
 async def lifespan(app):
-    task = asyncio.create_task(refresh_loop())
+    # uvicorn handles only SIGINT and SIGTERM, so SIGHUP is free for a reload.
+    asyncio.get_running_loop().add_signal_handler(signal.SIGHUP, reload_config, "SIGHUP")
+    tasks = [asyncio.create_task(refresh_loop())]
+    if RELOAD_POLL_S:
+        tasks.append(asyncio.create_task(watch_config()))
     yield
-    task.cancel()
+    for task in tasks:
+        task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -223,6 +229,7 @@ def settings(cfg: dict) -> dict:
         "CFG": cfg,
         "BIND": bind,
         "PORT": cfg.get("port", 8484),
+        "RELOAD_POLL_S": resource_limit(cfg, "reload_poll_s", 5, allow_zero=True),  # 0 = off
         "DEVICE_BY_KEY": {v: k for k, v in cfg["devices"].items()},
         "ACCOUNTS": {a["name"]: a for a in cfg["accounts"]},
         "MAX_REQUEST_BYTES": resource_limit(cfg, "max_request_bytes", 32 * 1024 * 1024),
@@ -278,6 +285,65 @@ try:
     globals().update(settings(_cfg))
 except ConfigError as exc:
     raise SystemExit(str(exc))
+
+# Settings fixed when the process starts: a reload validates them but leaves
+# them alone and reports the config key in CONFIG_STATUS["restart_needed"].
+# MAX_CONCURRENT_REQUESTS is captured by the middleware, the listen address and
+# port by the server, RELOAD_POLL_S by the watcher task; the rest are deployment
+# limits that the Debian unit pins through environment variables.
+RESTART_ONLY = {
+    "BIND": "bind", "PORT": "port", "RELOAD_POLL_S": "reload_poll_s",
+    "MAX_REQUEST_BYTES": "max_request_bytes", "MAX_RESPONSE_BYTES": "max_response_bytes",
+    "MAX_CONCURRENT_REQUESTS": "max_concurrent_requests",
+    "AUDIT_CACHE_RECORDS": "audit_cache_records", "AUDIT_CACHE_BYTES": "audit_cache_bytes",
+    "AUDIT_MAX_BYTES": "audit_max_bytes", "AUDIT_BACKUPS": "audit_backups",
+}
+CONFIG_STATUS = {"loaded_at": time.time(), "last_reload": None, "error": None,
+                 "restart_needed": []}
+
+
+def watched_files() -> tuple:
+    """The files the running config came from, stamped as they are now."""
+    return tuple((path, file_stamp(path)) for path, _ in CONFIG_FILES)
+
+
+def reload_config(reason: str) -> None:
+    """Re-read config.json and the token files and apply them. Any problem keeps
+    the config already running and is reported in CONFIG_STATUS and on stderr.
+    Runs as a plain callback on the event loop, so a request sees either all of
+    the old settings or all of the new ones; a request already sent keeps the
+    account it started on."""
+    global CONFIG_FILES
+    now = time.time()
+    CONFIG_STATUS["last_reload"] = now
+    before = watched_files()  # stamped first: an edit during the load is seen again
+    try:
+        cfg, files = load_config()
+        new = settings(cfg)
+        if new["PANEL_TAILNET"] and BIND not in LOOPBACK:
+            # BIND is the address actually listened on; the file's may differ.
+            raise ConfigError(f"panel_tailnet needs the proxy to listen on loopback, "
+                              f"and it is listening on {BIND}; restart first")
+    except (ConfigError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        CONFIG_FILES = before  # do not retry or log again until a file changes
+        error = str(exc) if isinstance(exc, ConfigError) else f"{type(exc).__name__}: {exc}"
+        CONFIG_STATUS["error"] = error
+        print(f"config reload ({reason}) failed; keeping the running config: {error}",
+              file=sys.stderr)
+        return
+    restart = [key for name, key in RESTART_ONLY.items() if new.pop(name) != globals()[name]]
+    globals().update(new)
+    CONFIG_FILES = files
+    CONFIG_STATUS.update(loaded_at=now, error=None, restart_needed=restart)
+    print(f"config reloaded ({reason}): {len(ACCOUNTS)} accounts, {len(DEVICE_BY_KEY)} devices"
+          + (f"; restart to apply: {', '.join(restart)}" if restart else ""), file=sys.stderr)
+
+
+async def watch_config() -> None:
+    while True:
+        await asyncio.sleep(RELOAD_POLL_S)
+        if watched_files() != CONFIG_FILES:
+            reload_config("file change")
 
 
 class RequestAdmission:
@@ -1038,6 +1104,7 @@ async def rotate_status(request: Request):
         "accounts": accounts,
         "recent_events": STATE["events"][-10:],
         "storage_errors": STORAGE_ERRORS,
+        "config": CONFIG_STATUS,
         "weekly": weekly_outlook(now),
     }
 

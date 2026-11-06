@@ -317,7 +317,8 @@ world and your Anthropic tokens is the device-key check. If you go this
 route, put [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/)
 (a Zero Trust service-token policy) in front so unauthenticated requests never
 reach the proxy, and treat device keys as revocable: delete a leaked one from
-`config.json` and restart. Prefer any of the VPN options above when possible.
+`config.json` (the proxy drops it at its next reload). Prefer any of the VPN
+options above when possible.
 
 ### Other overlays
 
@@ -411,6 +412,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
 | `accounts[].cap_lookahead` | overrides `cap_lookahead` for this account (default: the top-level value) |
 | `bind` / `port` | address and port the proxy listens on (defaults `"127.0.0.1"` / 8484). The environment variable `CLAUDE_ROTATE_BIND` overrides `bind`, for a container that must listen on `0.0.0.0` whatever the mounted config says. Both need a restart. |
+| `reload_poll_s` | seconds between checks of `config.json` and the token files for changes, which are then reloaded (default 5; 0 = off, leaving `SIGHUP`). Needs a restart. See "Reloading the configuration". |
 | `switch_threshold` | 5h-window utilization that triggers rotation (default 0.8) |
 | `switch_threshold_7d` | weekly-window utilization that makes an account unusable (default 0.98) |
 | `strategy` | `consume-first` (default), `least-used`, `most-weekly-left` or `weekly-pace` — see below |
@@ -430,6 +432,40 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `panel_tailnet` | `true` lets tailnet users open the panel without a device key, trusting the `Tailscale-User-Login` header from Tailscale Serve; requires a loopback `bind` (default false). See [SECURITY.md](SECURITY.md). |
 | `prices_per_mtok` | substring-matched `[input, output]` $ per MTok for the cost columns |
 | `alerts` | `device_tokens_per_hour`, `expensive_model_patterns`, `util_warn` |
+
+### Reloading the configuration
+
+The proxy reloads `config.json` and the token files without a restart, so
+adding an account or device, benching an account, replacing a token or revoking
+a device takes effect on the next reload. Two things start one:
+
+- **A file change.** Every `reload_poll_s` seconds (default 5) the proxy checks
+  `config.json` and the token file of every account, and reloads when one has
+  been replaced or edited. A token file can sit outside the config directory
+  (an absolute `token_file`), so a Docker or Kubernetes secret mount works the
+  same way.
+- **`SIGHUP`**, for an immediate reload, and the only trigger when
+  `reload_poll_s` is 0: `systemctl reload claude-rotate`, `kill -HUP <pid>`,
+  `launchctl kill SIGHUP gui/$(id -u)/<label>` or
+  `docker compose kill -s HUP claude-rotate`.
+
+A reload applies all of the new files or none. If they do not validate, the
+proxy keeps the configuration it is running, logs `config reload (...) failed;
+keeping the running config: <reason>` to stderr and reports the reason as
+`error` in the `config` object of `/rotate/status`, next to `loaded_at`,
+`last_reload` and `restart_needed`. Fixing the file is enough: the next change
+is loaded on its own.
+
+Requests already open carry on. A stream or a held request on an account or
+device that the reload removed finishes, and the next request sees the new
+configuration. Quota state and each device's current account are kept.
+
+Some settings are read once at startup. A reload checks them but leaves them
+alone, and lists any that changed in `restart_needed`: `bind`, `port`,
+`reload_poll_s`, `max_request_bytes`, `max_response_bytes`,
+`max_concurrent_requests`, `audit_cache_records`, `audit_cache_bytes`,
+`audit_max_bytes` and `audit_backups`. A value fixed by its `CLAUDE_ROTATE_*`
+environment variable is never listed.
 
 ### Rotation policy
 
@@ -518,7 +554,8 @@ rotation entirely (a work account you don't want touched, one you're resting)
 while keeping it visible in the panel. If the *active* account is disabled in
 config, the proxy selects an enabled account before sending the next request.
 If every account is disabled, it returns 503 without contacting upstream. Re-enable
-by deleting the flag; both changes need a restart (hot reload is on the roadmap).
+by deleting the flag; both changes apply on the next
+[reload](#reloading-the-configuration).
 
 Combine with `strategy` for the remaining temperament choice: `consume-first`
 (spend perishable weekly quota first), `least-used` (spread evenly) or
@@ -601,10 +638,15 @@ reason: `quota_exhausted`, `utilization>=<threshold>`, `consume_first`,
 switch, it was a per-minute burst — the proxy paced the same account on
 purpose (see [Rotation policy](#rotation-policy)).
 
-**Config edits don't take effect.** Config is read once at startup. Restart:
+**Config edits don't take effect.** The proxy loads a change within
+`reload_poll_s` seconds (default 5), or at once on `SIGHUP`. Look at `config` in
+`/rotate/status`: an `error` means the new files were rejected and the old
+configuration is still running, and `restart_needed` lists the settings that
+only a restart applies (see [Reloading the
+configuration](#reloading-the-configuration)). To restart:
 `launchctl kickstart -k gui/$(id -u)/<label>` (macOS) or
 `sudo claude-rotate-admin activate` (Debian service; validates the config, then
-restarts). Hot reload is on the roadmap.
+restarts).
 
 **Does the VS Code extension work?** Yes — it honours the same
 `ANTHROPIC_BASE_URL` / `CLAUDE_CODE_OAUTH_TOKEN` environment variables. Launch
@@ -635,7 +677,9 @@ Stated plainly, in the same spirit as the [comparison](#comparison-with-similar-
 - **Switches drop warm prompt caches.** After a rotation, every device's first
   request re-writes its prompt cache on the new account — that's the cost that
   burst-pacing (and the hysteresis margin) exist to avoid paying needlessly.
-- **Restart to reconfigure.** No hot reload yet.
+- **Some settings need a restart.** The listen address, port and resource
+  limits are read once; see [Reloading the
+  configuration](#reloading-the-configuration).
 - **Plain HTTP by design.** Transport privacy is delegated to the network
   layer — see [Connecting distributed devices](#connecting-distributed-devices).
 - **Built on undocumented headers.** Quota telemetry comes from
@@ -748,7 +792,7 @@ commercial or shared, use the API with metered billing instead.
   accounts. They stay on the server, mode 600, and are gitignored along with
   `config.json`, `state.json`, and `logs/`.
 - Device keys authenticate devices to the proxy only; revoke one by deleting
-  its entry in `config.json` and restarting.
+  its entry in `config.json`. The proxy drops it at its next reload.
 - Don't expose port 8484 to the public internet; bind to a tailnet/LAN
   interface or keep `bind: 0.0.0.0` behind a firewall.
 
@@ -813,8 +857,9 @@ Roadmap, in intended order:
       and stop re-reading the whole file per stats call (seek from the tail).
 - [ ] **Dockerfile** (+ compose example) — also enables running as a sidecar
       next to a router in k8s; tokens mounted as secrets.
-- [ ] **Hot config reload** (`SIGHUP` or mtime check) so `add-account` /
-      `add-device` don't need a restart.
+- [x] **Hot config reload.** An mtime poll of `config.json` and the token
+      files plus `SIGHUP`, in `rotator.py` (`reload_config`); see
+      [Reloading the configuration](#reloading-the-configuration).
 - [ ] **Token renewal automation** — setup-tokens last ~1 year; at minimum
       alert on auth failures (401 from upstream on a known-good account
       usually means the token died).
