@@ -128,7 +128,12 @@ def load_config() -> dict:
         raise SystemExit("devices must map names to nonempty device keys")
     if len(set(devices.values())) != len(devices):
         raise SystemExit("device keys must be unique")
-    bad = [d for d, k in devices.items() if "REPLACE-WITH" in k]
+    for acct in cfg["accounts"]:
+        if "private_to" in acct and (not isinstance(acct["private_to"], str)
+                                     or acct["private_to"] not in devices):
+            raise SystemExit(f"account '{acct['name']}': private_to must name a device "
+                             "in devices{}")
+    bad =[d for d, k in devices.items() if "REPLACE-WITH" in k]
     if bad:
         raise SystemExit(
             f"placeholder device key(s) in config.json: {', '.join(bad)} — the example "
