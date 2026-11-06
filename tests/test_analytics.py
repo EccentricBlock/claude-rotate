@@ -110,7 +110,7 @@ check("roster shows key suffix", devs["laptop"]["key_suffix"] == "…abcd")
 check("roster last model/account", devs["laptop"]["last_model"] == "claude-opus-5"
       and devs["laptop"]["last_account"] == "a")
 
-# --- weekly chart: summed usage, limit steps at resets, weights, run-out projection ---
+# --- weekly chart: summed usage dropping at resets, weights, run-out projection ---
 H = 3600
 old_a, new_a, rb = now - 20 * H, now - 20 * H + 7 * 86400, now + 50 * H
 
@@ -126,21 +126,22 @@ R.HISTORY = [{"ts": now - 30 * H, "accounts": {"a": [0.90, old_a], "b": [0.20, r
              {"ts": now - 10 * H, "accounts": {"a": [0.10, new_a], "b": [0.30, rb]}}]
 weekly_state(0.30, 0.30)
 s = R.weekly_series(now)
-check("chart opens at this week's usage, then adds each account's rises",
-      [p[1] for p in s] == [110, 110, 130, 150])
-check("limit steps up at a reset by what that week used",
-      [p[2] for p in s] == [200, 290, 290, 290])  # opens at the full limit: 2 accounts
+check("chart sums each account's current weekly usage, dropping at a reset",
+      [p[1] for p in s] == [110, 20, 40, 60])
+check("capacity sums the weights", [p[2] for p in s] == [200, 200, 200, 200])
+check("spent counts rises after the first sample, a new window in full",
+      [p[3] for p in s] == [0, 0, 20, 40])
 
 out = R.weekly_outlook(now)
-check("rate taken over the last 24 h; capacity sums the weights",
-      out["rate_per_day"] == 48.0 and out["capacity"] == 200)
+check("rate taken over the last 24 h; the series goes out without spent",
+      out["rate_per_day"] == 48.0 and out["capacity"] == 200
+      and [len(p) for p in out["series"]] == [3, 3, 3, 3])
 proj = out["projection"]
-# b resets at +50 h with its week fully used (+100); everything is spent at +120 h and
-# usage pauses until a resets at +148 h (+100); then it resumes until the 7.5-day horizon.
-check("7.5-day projection steps the limit up at each reset",
-      [p[2] for p in proj] == [290, 290, 390, 390, 390, 490, 490])
-check("projected usage pauses while every account is spent",
-      [p[1] for p in proj] == [150, 250, 250, 390, 390, 390, 454])
+# b resets at +50 h with its week fully used (-100); everything is spent at +120 h and
+# usage pauses until a resets at +148 h (-100); then it resumes until the 7.5-day horizon.
+check("7.5-day projection drops usage at each reset and pauses while all is spent",
+      [p[1] for p in proj] == [60, 160, 60, 200, 200, 100, 164])
+check("projected capacity stays flat", all(p[2] == 200 for p in proj))
 check("ETA is the first shortfall; quota returns at a's reset",
       abs(out["eta"] - (now + 120 * H)) <= 5 and out["back"] == round(new_a)  # ts rounding
       and out["back_account"] == "a" and proj[-1][0] == round(now + 7.5 * 86400))
@@ -153,9 +154,9 @@ check("run-out ETA when the remaining 10 points go at 8.5 points/h",
 
 R.ACCOUNTS["b"]["weight"] = 0.25  # b becomes a quarter-size plan
 weekly_state(0.30, 0.30)
-check("weights scale an account's share", R.weekly_series(now)[-1][1:] == [127.5, 215])
+check("weights scale an account's share", R.weekly_series(now)[-1][1:3] == [37.5, 125])
 R.ACCOUNTS["b"] = {"name": "b", "disabled": True}
-check("disabled accounts leave the chart", R.weekly_series(now)[-1][1:] == [120, 190])
+check("disabled accounts leave the chart", R.weekly_series(now)[-1][1:3] == [30, 100])
 R.ACCOUNTS["b"] = {"name": "b"}
 
 R.HISTORY = [{"ts": now - 20 * H, "accounts": {"a": [0.50, now + 5 * H], "b": [0.50, rb]}},

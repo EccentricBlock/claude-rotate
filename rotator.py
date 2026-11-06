@@ -505,25 +505,25 @@ def record_history(now: float) -> None:
 
 
 def weekly_series(now: float) -> list:
-    """[ts, used, limit] in % of one weekly quota. `used` sums each enabled account's
-    weekly rises (weighted); `limit` = used + what every account has left, so it steps
-    up at a reset by what that account used in the closing window — the rest expired."""
-    points, used, seen = [], 0.0, {}
+    """[ts, used, capacity, spent] in % of one weekly quota. `used` sums each enabled
+    account's current weekly usage (weighted), so it drops at that account's reset;
+    `capacity` sums the weights. `spent` adds up the weekly rises seen since the first
+    sample, so the run-out rate can be measured without resets cancelling usage."""
+    points, spent, seen = [], 0.0, {}
     for sample in HISTORY + [{"ts": now, "accounts": weekly_snapshot()}]:
-        left = 0.0
+        used = cap = 0.0
         for name, (u, reset) in sample["accounts"].items():
             if name not in ACCOUNTS or disabled(name):
                 continue
-            # First sight counts as a new window, so the chart opens at the current
-            # week's usage against the full limit (the sum of the weights).
-            last_reset, top = seen.get(name, (float("-inf"), 0.0))
+            last_reset, top = seen.get(name, (reset, u))  # first sight is a baseline
             if reset > last_reset + 3600:  # a new weekly window: all of it is new usage
-                used, top = used + weight(name) * u, u
+                spent, top = spent + weight(name) * u, u
             elif u > top:
-                used, top = used + weight(name) * (u - top), u
+                spent, top = spent + weight(name) * (u - top), u
             seen[name] = (max(reset, last_reset), top)
-            left += weight(name) * (1 - u)
-        points.append([round(sample["ts"]), round(used * 100, 1), round((used + left) * 100, 1)])
+            used += weight(name) * u
+            cap += weight(name)
+        points.append([round(sample["ts"]), round(used * 100, 1), round(cap * 100, 1), round(spent * 100, 1)])
     return points
 
 
@@ -532,7 +532,7 @@ def weekly_outlook(now: float) -> dict:
     consume-first (soonest weekly reset first); while every enabled account is at
     100% usage pauses until the next reset. `eta` is the first such moment."""
     points = weekly_series(now)
-    out = {"series": points, "projection": [], "rate_per_day": None,
+    out = {"series": [p[:3] for p in points], "projection": [], "rate_per_day": None,
            "eta": None, "back": None, "back_account": None,
            "capacity": round(sum(weight(n) for n in weekly_snapshot()) * 100)}
     day = [p for p in points if p[0] >= now - 86400]
@@ -542,7 +542,7 @@ def weekly_outlook(now: float) -> dict:
     if span < 3600:
         out["note"] = "not enough history with quota left yet to measure a rate"
         return out
-    rate = (day[-1][1] - day[0][1]) / span  # % of one weekly quota per second
+    rate = (day[-1][3] - day[0][3]) / span  # % of one weekly quota per second
     out["rate_per_day"] = round(rate * 86400, 1)
     accts = {n: [u * 100, reset] for n, (u, reset) in weekly_snapshot().items()}
     if rate <= 0 or not accts:
@@ -555,31 +555,32 @@ def weekly_outlook(now: float) -> dict:
     def left():
         return sum(weight(n) * (100 - u) for n, (u, _) in accts.items())
 
-    t, used, horizon = now, points[-1][1], now + PROJECT_DAYS * 86400
-    proj = [[round(t), used, round(used + left(), 1)]]
+    def point(t):
+        return [round(t), round(sum(weight(n) * u for n, (u, _) in accts.items()), 1), out["capacity"]]
+
+    t, horizon = now, now + PROJECT_DAYS * 86400
+    proj = [point(t)]
     while t < horizon:
         nxt = min(accts, key=lambda n: accts[n][1])
         reset = accts[nxt][1]
         end = min(reset, horizon)
         empty = t + left() / rate
         if empty < end:  # everything spent before the next reset: flat until it
-            used += left()
             for a in accts.values():
                 a[0] = 100.0
-            proj.append([round(empty), round(used, 1), round(used, 1)])
+            proj.append(point(empty))
             if out["eta"] is None:
                 out.update(eta=round(empty), back=round(reset), back_account=nxt)
         else:
             spend = rate * (end - t)
-            used += spend
             for n in sorted(accts, key=lambda n: accts[n][1]):
                 take = min(spend, weight(n) * (100 - accts[n][0]))
                 accts[n][0] += take / weight(n)
                 spend -= take
-        proj.append([round(end), round(used, 1), round(used + left(), 1)])
+        proj.append(point(end))
         if end == reset:
             accts[nxt] = [0.0, reset + 7 * 86400]
-            proj.append([round(end), round(used, 1), round(used + left(), 1)])
+            proj.append(point(end))
         t = end
     out["projection"] = proj
     return out
@@ -1058,7 +1059,7 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
  <div class="card tile"><div class="label">Cost-equivalent, 7 d</div><div class="v" id="k-cost">–</div><div class="muted small" id="k-cost-sub"></div></div>
 </section>
 <section class="accounts" id="accounts"></section>
-<section class="card"><h2>Weekly quota, all accounts <span class="muted" style="font-weight:400">14 days + 7.5-day projection &middot; scroll for history</span>
+<section class="card"><h2>Weekly quota, all accounts <span class="muted" style="font-weight:400">summed weekly usage &middot; 14 days + 7.5-day projection</span>
  <span class="legend"><span><span class="key" style="border-color:var(--s1)"></span>Usage</span><span><span class="key" style="border-color:var(--s2)"></span>Limit</span>
  <span><span class="key dash" style="border-color:var(--muted)"></span>Projected</span><span><span class="key band"></span>&#9940; Every account at its limit</span></span>
  <button class="linkbtn" id="tbl">Table</button></h2>
@@ -1100,7 +1101,7 @@ function weekly(p){
   // The plot scrolls from the first sample to the projection's end and opens centred on now.
   const half=(cw<600?3.5:7.5)*D, x0=Math.min(p.series[0][0],now-half), x1=Math.max(now+half,all[all.length-1][0]);
   const pps=(cw-L-R)/(2*half), st=pps*D<60?2:1;
-  const ymax=Math.ceil(Math.max(100,...all.map(q=>q[2]))*1.08/100)*100;
+  const ymax=Math.ceil(Math.max(100,...all.map(q=>q[2]))*1.1/50)*50, gs=ymax>300?100:50;
   const X=t=>(t-x0)*pps, Y=v=>T+(1-v/ymax)*(Hh-T-B), PW=Math.ceil(X(x1)+R);
   const path=(a,i)=>a.map((q,k)=>(k?'L':'M')+X(q[0]).toFixed(1)+','+Y(q[i]).toFixed(1)).join('');
   WK={all,now,x0,pps,start:X(now-half)};
@@ -1112,13 +1113,13 @@ function weekly(p){
   for(const q of all){const hit=q[2]-q[1]<=0.1;  // every account at its weekly limit: usage has met the limit line
     if(hit&&from==null) from=q[0]; else if(!hit&&from!=null){s+=band(from,q[0]);from=null}}
   if(from!=null) s+=band(from,all[all.length-1][0]);
-  for(let v=0;v<=ymax;v+=100){y+=`<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}%</text>`; s+=`<line x1="0" x2="${PW}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v?'var(--grid)':'var(--axis)'}"/>`}
+  for(let v=0;v<=ymax;v+=gs){y+=`<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}%</text>`; s+=`<line x1="0" x2="${PW}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v?'var(--grid)':'var(--axis)'}"/>`}
   for(let t=Math.ceil(x0/D/st)*st*D;t<x1;t+=st*D) if(X(t)>18) s+=`<text x="${X(t)}" y="${Hh-8}" text-anchor="middle">${esc(day(t))}</text>`;
   s+=`<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity=".5"/><text x="${X(now)+4}" y="${T+10}">now</text>${cw<600?'':`<text x="${X(x1)-4}" y="${T+10}" text-anchor="end">projected</text>`}`
     +`<path d="${path(p.series,1)}L${X(now)},${Y(0)}L${X(p.series[0][0])},${Y(0)}Z" fill="var(--s1)" opacity=".1"/>`
     +`<path d="${path(p.series,2)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round"/><path d="${path(p.series,1)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>`
     +`<path d="${path(p.projection,2)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-dasharray="6 5" opacity=".8"/><path d="${path(p.projection,1)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-dasharray="6 5" opacity=".8"/>`;
-  for(let i=1;i<all.length;i++){const up=all[i][2]-all[i-1][2]; if(up>=1) s+=`<text x="${X(all[i][0])}" y="${Y(all[i][2])-6}" text-anchor="middle">+${Math.round(up)}</text>`}  // a weekly reset gave quota back
+  for(let i=1;i<all.length;i++){const dn=all[i-1][1]-all[i][1]; if(dn>=1) s+=`<text x="${X(all[i-1][0])}" y="${Y(all[i-1][1])-8}" text-anchor="middle">reset &minus;${Math.round(dn)}</text>`}  // a weekly reset gave quota back
   for(const [i,c,dy] of [[1,'var(--s1)',18],[2,'var(--s2)',-9]])  // usage label below its dot, limit above
     s+=`<circle cx="${X(now)}" cy="${Y(last[i])}" r="4.5" fill="${c}" stroke="var(--surface)" stroke-width="2"/><text x="${X(now)-8}" y="${Y(last[i])+dy}" text-anchor="end" style="fill:var(--ink)">${Math.round(last[i])}%</text>`;
   return `<div class="wk">${y}</svg><div class="wk-scroll" id="wk-scroll">${s}<line id="xh" x1="0" x2="0" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity="0"/></svg></div></div>`+sentence(p,now)}

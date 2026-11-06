@@ -339,19 +339,18 @@ rate-limit headers:
 - **Accounts** — live 5-hour and weekly meters (from Anthropic's own headers)
   with a tick at the switch threshold, reset countdowns, upstream status and
   the active account.
-- **Weekly quota, all accounts** — 14 days of weekly usage summed over the
-  enabled accounts (blue) against what they could have used (orange: usage
-  plus what is left, stepping up at each account's weekly reset by what that
-  week used — the rest expired). A 7.5-day projection spends the last 24 h rate
-  consume-first, pauses usage while every account is spent, and steps the
-  limit up at each projected reset; it states when every account first
-  reaches 100% and when the next reset brings quota back. Periods when every
-  account was or will be at its limit are shaded. The chart opens on 7.5 days
-  either side of now (3.5 days on a phone) and scrolls back to the first
-  sample. Hover or tap for values; **Table**
-  shows the same data as a table. History is sampled every 30 min into
-  `usage_history.json` next to `state.json`, so the chart fills over the first
-  two weeks. Accounts on different plans need `accounts[].weight`.
+- **Weekly quota, all accounts** — the enabled accounts' current weekly
+  usage, summed (blue), against their combined capacity (orange: 100% per
+  account, scaled by `accounts[].weight`). Usage drops at each account's weekly
+  reset by what that week used. A 7.5-day projection spends the last 24 h rate
+  consume-first, pauses usage while every account is spent, and drops it at
+  each projected reset; it states when every account first reaches 100% and
+  when the next reset brings quota back. The rate counts only rises in usage,
+  so a reset does not cancel consumption. Periods when every account was or
+  will be at its limit are shaded. The chart opens on 7.5 days either side of
+  now (3.5 days on a phone) and scrolls back to the first sample. Hover or tap
+  for values; **Table** shows the same data as a table. History is sampled
+  every 30 min into `usage_history.json` next to `state.json` and kept 14 days.
 - **Devices** — every registered device (online status, last seen, last model)
   and every removed device that still has history, with usage over 24 h, 7 d,
   30 d and all time plus a 30-day cost trend. 7 d and 30 d are calendar days,
