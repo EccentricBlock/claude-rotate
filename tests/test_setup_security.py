@@ -55,6 +55,23 @@ def main():
         assert run("onboard", "alice", "desktop").returncode != 0
         assert cfg_path.read_bytes() == before
         assert not (root / "outside.token").exists()
+
+        # --private-to takes one device or a comma list; bad lists change nothing.
+        token = "sk-ant-oat01-dummy-test\n"
+        before = cfg_path.read_bytes()
+        for value in ("ghost", "Alice_01-laptop,ghost", "Alice_01-laptop,Alice_01-laptop", "a b,alice-desktop"):
+            result = run("add-account", "priv-account", "--private-to", value, input=token)
+            assert result.returncode != 0, value
+            assert cfg_path.read_bytes() == before, value
+            assert not (root / "tokens/priv-account.token").exists(), value
+        assert run("add-account", "priv-account", "--private-to", "Alice_01-laptop", input=token).returncode == 0
+        accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
+        assert accounts["priv-account"]["private_to"] == "Alice_01-laptop"
+        assert "priority" not in accounts["priv-account"]
+        both = "Alice_01-laptop,alice-desktop"
+        assert run("add-account", "priv-account", "--private-to", both, input=token).returncode == 0
+        accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
+        assert accounts["priv-account"]["private_to"] == ["Alice_01-laptop", "alice-desktop"]
         print("setup security checks passed")
 
 

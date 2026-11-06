@@ -567,17 +567,17 @@ def read_token(args) -> str:
     return token
 
 
-def set_private(acct: dict, device: str) -> None:
-    """Reserve an account for one device, at the top priority tier (as
-    setup.sh add-account --private-to does)."""
-    acct["private_to"] = device
-    acct["priority"] = 1
+def set_private(acct: dict, devices: list) -> None:
+    """Reserve an account for these devices: a name for one, a list for several."""
+    acct["private_to"] = devices[0] if len(devices) == 1 else devices
 
 
 def cmd_add_token(args) -> int:
     validate_name(args.name, "account name")
-    if args.private_to is not None:
-        validate_name(args.private_to, "device name")
+    for device in args.private_to or []:
+        validate_name(device, "device name")
+    if len(set(args.private_to or [])) != len(args.private_to or []):
+        raise Refused("--private-to lists a device twice")
     token = read_token(args)
     uid, gid = owner_uid(), service_ids()[1]
     with AdminLock():
@@ -585,9 +585,10 @@ def cmd_add_token(args) -> int:
         cfg = load_config()
         if not TOKENS.is_dir():
             raise Refused(f"{TOKENS} is missing; run install.sh (or claude-rotate-admin init)")
-        if args.private_to is not None and args.private_to not in cfg["devices"]:
-            raise Refused(f"device '{args.private_to}' is not registered; "
-                          f"run: claude-rotate-admin add-user {args.private_to}")
+        for device in args.private_to or []:
+            if device not in cfg["devices"]:
+                raise Refused(f"device '{device}' is not registered; "
+                              f"run: claude-rotate-admin add-user {device}")
         existing = next((a for a in cfg["accounts"] if a["name"] == args.name), None)
         if existing is not None:
             path = token_path(existing)
@@ -655,10 +656,19 @@ def cmd_remove_user(args) -> int:
         cfg = load_config()
         if args.name not in cfg["devices"]:
             raise Refused(f"device '{args.name}' does not exist; nothing changed")
-        owned = [a["name"] for a in cfg["accounts"] if a.get("private_to") == args.name]
-        if owned:
-            raise Refused(f"account(s) {', '.join(owned)} are private to '{args.name}'; "
-                          "remove them or clear private_to first")
+        shared = []  # accounts that stay private to the other owners
+        sole = []
+        for a in cfg["accounts"]:
+            owners = a.get("private_to") or []
+            owners = [owners] if isinstance(owners, str) else list(owners)
+            if args.name in owners:
+                (shared if len(owners) > 1 else sole).append((a, owners))
+        if sole:
+            raise Refused(f"account(s) {', '.join(a['name'] for a, _ in sole)} are private only to "
+                          f"'{args.name}'; remove them or change private_to first")
+        for a, owners in shared:
+            set_private(a, [o for o in owners if o != args.name])
+            out(f"account '{a['name']}' is no longer private to '{args.name}'")
         del cfg["devices"][args.name]
         write_config(cfg)
         out(f"device '{args.name}' removed from the configuration")
@@ -988,8 +998,8 @@ def build_parser():
             "an existing account gets its token replaced", aliases=("add-account",))
     p.add_argument("name", metavar="NAME")
     p.add_argument("--token-file", help="read the token from this file instead of the prompt/stdin")
-    p.add_argument("--private-to", metavar="DEVICE",
-                   help="reserve the account for this registered device, at priority 1")
+    p.add_argument("--private-to", metavar="DEVICE[,DEVICE...]", type=lambda v: v.split(","),
+                   help="reserve the account for these registered devices; they use it first")
     p.add_argument("--no-restart", action="store_true", help="store only; do not touch the service")
     p = add("add-user", cmd_add_user, "mint a device key and print the client settings", aliases=("add-device",))
     p.add_argument("name", metavar="NAME")

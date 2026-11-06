@@ -197,24 +197,35 @@ def test_add_user_activation_and_duplicates(f):
 
 def test_private_to_flag_and_device_removal_guard(f):
     accounts_before = f.cfg()["accounts"]
-    # An unregistered or badly named device is refused without touching anything.
+    devices_before = f.cfg()["devices"]
+    assert f.run("add-user", "carol-tmp", "--no-restart").returncode == 0
+    # An unregistered, badly named or repeated device is refused without touching anything.
     config_before = f.config.read_bytes()
-    for device, message in (("ghost", "not registered"), ("bad name", "device name")):
-        r = f.run("add-token", "acct-priv", "--private-to", device, "--no-restart", input=TOKEN + "\n")
-        assert r.returncode == 1 and message in r.stderr, (device, r)
+    for value, message in (("ghost", "not registered"), ("alice-laptop,ghost", "not registered"),
+                           ("bad name", "device name"), ("alice-laptop,alice-laptop", "twice")):
+        r = f.run("add-token", "acct-priv", "--private-to", value, "--no-restart", input=TOKEN + "\n")
+        assert r.returncode == 1 and message in r.stderr, (value, r)
         assert f.config.read_bytes() == config_before and not (f.tokens / "acct-priv.token").exists()
-    # A private account is reserved for its device at priority 1.
+    # One device is stored as a name, several as a list, and priority is left alone.
     r = f.run("add-token", "acct-priv", "--private-to", "alice-laptop", "--no-restart", input=TOKEN + "\n")
     assert r.returncode == 0, r
     assert f.cfg()["accounts"][-1] == {"name": "acct-priv", "token_file": "tokens/acct-priv.token",
-                                       "private_to": "alice-laptop", "priority": 1}
+                                       "private_to": "alice-laptop"}
+    r = f.run("add-token", "acct-priv", "--private-to", "alice-laptop,carol-tmp", "--no-restart",
+              input=TOKEN + "\n")
+    assert r.returncode == 0 and f.cfg()["accounts"][-1]["private_to"] == ["alice-laptop", "carol-tmp"], r
     # Renewing the token without the flag leaves the reservation alone.
     r = f.run("add-token", "acct-priv", "--no-restart", input=TOKEN + "\n")
-    assert r.returncode == 0 and f.cfg()["accounts"][-1]["private_to"] == "alice-laptop", r
-    # Its device cannot be removed while it owns the account: startup would fail.
+    assert r.returncode == 0 and f.cfg()["accounts"][-1]["private_to"] == ["alice-laptop", "carol-tmp"], r
+    # One of several owners can be removed: it just leaves the list.
+    r = f.run("remove-user", "carol-tmp", "--no-restart")
+    assert r.returncode == 0 and "no longer private to 'carol-tmp'" in r.stdout, r
+    assert f.cfg()["accounts"][-1]["private_to"] == "alice-laptop"
+    assert f.cfg()["devices"] == devices_before
+    # The sole owner cannot be removed: startup would fail, or the account would turn shared.
     config_before = f.config.read_bytes()
     r = f.run("remove-user", "alice-laptop", "--no-restart")
-    assert r.returncode == 1 and "acct-priv" in r.stderr and "private to" in r.stderr, r
+    assert r.returncode == 1 and "acct-priv" in r.stderr and "private only to" in r.stderr, r
     assert f.config.read_bytes() == config_before
     r = f.run("remove-token", "acct-priv", "--no-restart")
     assert r.returncode == 0 and f.cfg()["accounts"] == accounts_before, r

@@ -538,11 +538,12 @@ Set it in `config.json`, or with the CLI:
 
 ```sh
 ./setup.sh add-account max-20x --private-to kamal-mbp
-sudo claude-rotate-admin add-token max-20x --private-to kamal-mbp   # Debian service
+sudo claude-rotate-admin add-token max-20x --private-to kamal-mbp,kamal-mini   # Debian service
 ```
 
-The admin CLI also refuses `remove-user` for a device that still owns a private
-account.
+Both take one device or a comma-separated list. `claude-rotate-admin remove-user`
+takes a device out of every `private_to` list that has other owners, and refuses
+a device that is the only owner of an account.
 
 This is what you reach for when someone joins with their own subscription and
 you don't want the rest of the pool quietly burning their weekly quota.
@@ -832,7 +833,7 @@ Based on clement-z `56ef19e`.
 - Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account also used in chat is not drained before the working week ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
 - Made the idle refresh's probe model configurable with `refresh_idle_model`, and documented the refresh's daily cost per idle account ([05f1c6e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/05f1c6e)).
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
-- Took private accounts from kamal/claude-rotate (authorship preserved, admin dashboard and join page left out): `accounts[].private_to` reserves an account for one device, `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token`, and a panel badge ([kamal 98c5520](https://github.com/kamal/claude-rotate/commit/98c5520), [kamal ca5d02b](https://github.com/kamal/claude-rotate/commit/ca5d02b)).
+- Took private accounts from kamal/claude-rotate (authorship preserved, admin dashboard and join page left out): `accounts[].private_to` reserves an account for one or more devices that use it before the shared pool, `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token`, and a panel badge ([kamal 98c5520](https://github.com/kamal/claude-rotate/commit/98c5520), [kamal ca5d02b](https://github.com/kamal/claude-rotate/commit/ca5d02b)).
 
 ### clement-z/claude-rotate
 

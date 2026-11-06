@@ -5,7 +5,8 @@
 #   ./setup.sh                       first-time init (creates config.json, dirs)
 #   ./setup.sh add-device <name>     mint a device key and register it
 #   ./setup.sh add-account <name>    store a `claude setup-token` for an account
-#                                    (--private-to <device> reserves it for one device)
+#                                    (--private-to <device>[,<device>...] reserves it
+#                                    for those devices)
 #   ./setup.sh onboard <user> <dev>  team flow: mint <user>-<dev> key, restart the
 #                                    service, print a paste-ready welcome block
 #                                    (uses config.json "public_url" when set)
@@ -27,12 +28,13 @@ add-device)
     validate_name "$name"
     ;;
 add-account)
-    name="${2:?usage: ./setup.sh add-account <name> [--private-to <device>]}"
+    name="${2:?usage: ./setup.sh add-account <name> [--private-to <device>[,<device>...]]}"
     validate_name "$name"
     priv=""
     if [ "${3:-}" = "--private-to" ]; then
         priv="${4:?missing device name after --private-to}"
-        validate_name "$priv"
+        IFS=',' read -r -a priv_devices <<< "$priv"
+        for d in "${priv_devices[@]}"; do validate_name "$d"; done
     elif [ -n "${3:-}" ]; then
         echo "error: unknown option: $3" >&2; exit 1
     fi
@@ -121,8 +123,14 @@ onboard)
     echo "──────────────────────────────────────────────────────────────"
     ;;
 add-account)
-    if [ -n "$priv" ] && ! python3 -c "import json,sys; sys.exit(0 if sys.argv[1] in json.load(open('config.json')).get('devices', {}) else 1)" "$priv"; then
-        echo "error: device '$priv' is not registered — add it first (./setup.sh add-device $priv)" >&2
+    for d in ${priv_devices[@]+"${priv_devices[@]}"}; do
+        if ! python3 -c "import json,sys; sys.exit(0 if sys.argv[1] in json.load(open('config.json')).get('devices', {}) else 1)" "$d"; then
+            echo "error: device '$d' is not registered — add it first (./setup.sh add-device $d)" >&2
+            exit 1
+        fi
+    done
+    if [ -n "$priv" ] && [ "$(printf '%s\n' "${priv_devices[@]}" | sort -u | wc -l)" -ne "${#priv_devices[@]}" ]; then
+        echo "error: --private-to lists a device twice" >&2
         exit 1
     fi
     echo "Run 'claude setup-token' in a browser session logged into that account,"
@@ -141,14 +149,14 @@ if acct is None:
     acct = {"name": name, "token_file": f"tokens/{name}.token"}
     cfg["accounts"].append(acct)
 if priv:
-    acct["private_to"] = priv
-    acct["priority"] = 1  # private accounts are top-tier for their owner
+    owners = priv.split(",")
+    acct["private_to"] = owners[0] if len(owners) == 1 else owners
 else:
     acct.pop("private_to", None)
 json.dump(cfg, open("config.json", "w"), indent=2)
 EOF
     if [ -n "$priv" ]; then
-        echo "account '$name' stored (private to device '$priv'). Restart rotator.py to load it."
+        echo "account '$name' stored (private to: ${priv//,/, }). Restart rotator.py to load it."
     else
         echo "account '$name' stored. Restart rotator.py to load it."
     fi
