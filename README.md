@@ -807,6 +807,7 @@ Based on clement-z `56ef19e`.
 - Fixed [doxaras/claude-rotate#3](https://github.com/doxaras/claude-rotate/issues/3): the all-blocked fallback and the hold-until-reset wait rank accounts by when they can serve again, and a rejected account is never treated as usable on a stale reading.
 - Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account also used in chat is not drained before the working week ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
 - Made the idle refresh's probe model configurable with `refresh_idle_model`, and documented the refresh's daily cost per idle account ([05f1c6e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/05f1c6e)).
+- Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
 
 ### clement-z/claude-rotate
 
