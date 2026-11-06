@@ -695,6 +695,8 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
         return float(v) if v is not None else None
 
     async with state_lock:
+        if account not in ACCOUNTS:
+            return None  # the config dropped it while this request was in flight
         info = STATE["accounts"].setdefault(account, {})
         for key, header in (
             ("util_5h", "anthropic-ratelimit-unified-5h-utilization"),
@@ -822,6 +824,8 @@ async def refresh_idle_accounts() -> None:
     seen or tried for REFRESH_IDLE_S a 1-token request and record its headers."""
     now = time.time()
     for name in ACCOUNTS:
+        if name not in ACCOUNTS:
+            continue  # a reload replaced ACCOUNTS during an earlier probe's await
         last = max(STATE["accounts"].get(name, {}).get("last_seen", 0), _REFRESH_TRIED.get(name, 0))
         if disabled(name) or now - last < REFRESH_IDLE_S:
             continue
@@ -1696,8 +1700,11 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
                                   time.time(), device)
                     save_state()
                     account = good
-        fwd_headers["authorization"] = f"Bearer {ACCOUNTS[account]['token']}"
-        pace = STATE["accounts"].get(account, {}).get("pace_until", 0) - time.time()
+        token = ACCOUNTS.get(account, {}).get("token")
+        if token is None:
+            continue  # the config dropped it while this request waited; pick again
+        fwd_headers["authorization"] = f"Bearer {token}"
+        pace =STATE["accounts"].get(account, {}).get("pace_until", 0) - time.time()
         if pace > 0:
             await retry_wait(min(pace, 60), request)
         upstream = await client.send(
