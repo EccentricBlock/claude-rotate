@@ -463,7 +463,7 @@ async def refresh_loop() -> None:
 
 
 HISTORY_PATH = STATE_PATH.with_name("usage_history.json")
-HISTORY_DAYS, SAMPLE_S, PROJECT_DAYS = 14, 1800, 7
+HISTORY_DAYS, SAMPLE_S, PROJECT_DAYS = 14, 1800, 7.5
 
 
 def load_history() -> list:
@@ -1027,7 +1027,7 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink2);font-weight:400;margin-left:auto}
  .key{display:inline-block;width:16px;border-top:2px solid;vertical-align:4px;margin-right:6px}
  .key.dash{border-top-style:dashed} .key.band{height:10px;border:0;vertical-align:-1px;background:rgba(208,59,59,.3)}
- #weekly svg{touch-action:pan-y} svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+ .wk{display:flex} .wk svg{display:block} .wk-scroll{flex:1;min-width:0;overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--axis) transparent} svg text{fill:var(--muted);font-size:11px;font-family:inherit}
  .tip{position:absolute;pointer-events:none;background:#262624;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;min-width:170px;display:none}
  .tip .row{display:flex;justify-content:space-between;gap:12px} .tip .v{color:var(--ink);font-weight:600}
  .sentence{margin-top:8px;color:var(--ink2)}
@@ -1058,7 +1058,7 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
  <div class="card tile"><div class="label">Cost-equivalent, 7 d</div><div class="v" id="k-cost">–</div><div class="muted small" id="k-cost-sub"></div></div>
 </section>
 <section class="accounts" id="accounts"></section>
-<section class="card"><h2>Weekly quota, all accounts <span class="muted" style="font-weight:400">14 days + 7-day projection</span>
+<section class="card"><h2>Weekly quota, all accounts <span class="muted" style="font-weight:400">14 days + 7.5-day projection &middot; scroll for history</span>
  <span class="legend"><span><span class="key" style="border-color:var(--s1)"></span>Usage</span><span><span class="key" style="border-color:var(--s2)"></span>Limit</span>
  <span><span class="key dash" style="border-color:var(--muted)"></span>Projected</span><span><span class="key band"></span>&#9940; Every account at its limit</span></span>
  <button class="linkbtn" id="tbl">Table</button></h2>
@@ -1095,39 +1095,42 @@ function spark(v){if(!v||!v.length)return '';const w=96,h=24,m=Math.max(...v)||1
   return `<svg width="${w}" height="${h}"><polyline points="${v.map((x,i)=>(i/(v.length-1)*w).toFixed(1)+','+y(x)).join(' ')}" fill="none" stroke="var(--muted)" stroke-width="1.5"/><circle cx="${w}" cy="${y(v[v.length-1])}" r="3" fill="var(--s1)"/></svg>`}
 function weekly(p){
   if(!p||!p.series.length) return 'collecting data';
-  const W=Math.max(300,$('weekly').clientWidth||1100),Hh=W<600?220:270,L=48,R=12,T=14,B=26,st=W<700?4:2, now=p.series[p.series.length-1][0], x0=now-14*D, x1=now+7*D;
+  const cw=Math.max(300,$('weekly').clientWidth||1100),Hh=cw<600?220:270,L=48,R=12,T=14,B=26, now=p.series[p.series.length-1][0];
   const all=p.series.concat(p.projection.slice(1)), last=p.series[p.series.length-1];
+  // The plot scrolls from the first sample to the projection's end and opens centred on now.
+  const half=(cw<600?3.5:7.5)*D, x0=Math.min(p.series[0][0],now-half), x1=Math.max(now+half,all[all.length-1][0]);
+  const pps=(cw-L-R)/(2*half), st=pps*D<60?2:1;
   const ymax=Math.ceil(Math.max(100,...all.map(q=>q[2]))*1.08/100)*100;
-  const X=t=>L+(Math.max(t,x0)-x0)/(x1-x0)*(W-L-R), Y=v=>T+(1-v/ymax)*(Hh-T-B);
+  const X=t=>(t-x0)*pps, Y=v=>T+(1-v/ymax)*(Hh-T-B), PW=Math.ceil(X(x1)+R);
   const path=(a,i)=>a.map((q,k)=>(k?'L':'M')+X(q[0]).toFixed(1)+','+Y(q[i]).toFixed(1)).join('');
-  WK={all,now,x0,x1,L,R,W};
+  WK={all,now,x0,pps,start:X(now-half)};
   if(showTable){let h='<table><tr><th>Time</th><th>Usage</th><th>Limit</th><th>Headroom</th></tr>';
     for(const q of all.filter((q,i)=>i%48===0||i===all.length-1)) h+=`<tr><td>${esc(when(q[0]))}${q[0]>now?' (projected)':''}</td><td>${Math.round(q[1])}%</td><td>${Math.round(q[2])}%</td><td>${Math.round(q[2]-q[1])}%</td></tr>`;
     return h+'</table>'+sentence(p,now)}
-  let s=`<svg viewBox="0 0 ${W} ${Hh}" width="100%"><rect x="${X(now)}" y="${T}" width="${X(x1)-X(now)}" height="${Hh-T-B}" fill="#fff" opacity=".025"/>`, from=null;
+  let y=`<svg width="${L}" height="${Hh}">`, s=`<svg width="${PW}" height="${Hh}"><rect x="${X(now)}" y="${T}" width="${X(x1)-X(now)}" height="${Hh-T-B}" fill="#fff" opacity=".025"/>`, from=null;
   const band=(a,b)=>`<rect class="hit" x="${X(a)}" y="${T}" width="${(X(b)-X(a)).toFixed(1)}" height="${Hh-T-B}" fill="var(--crit)" opacity=".2"/>`;
   for(const q of all){const hit=q[2]-q[1]<=0.1;  // every account at its weekly limit: usage has met the limit line
     if(hit&&from==null) from=q[0]; else if(!hit&&from!=null){s+=band(from,q[0]);from=null}}
   if(from!=null) s+=band(from,all[all.length-1][0]);
-  for(let v=0;v<=ymax;v+=100) s+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v?'var(--grid)':'var(--axis)'}"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}%</text>`;
-  for(let t=Math.ceil(x0/D/st)*st*D;t<x1;t+=st*D) s+=`<text x="${X(t)}" y="${Hh-8}" text-anchor="middle">${esc(day(t))}</text>`;
-  s+=`<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity=".5"/><text x="${X(now)+4}" y="${T+10}">now</text>${W<600?'':`<text x="${X(x1)-4}" y="${T+10}" text-anchor="end">projected</text>`}`
+  for(let v=0;v<=ymax;v+=100){y+=`<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}%</text>`; s+=`<line x1="0" x2="${PW}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v?'var(--grid)':'var(--axis)'}"/>`}
+  for(let t=Math.ceil(x0/D/st)*st*D;t<x1;t+=st*D) if(X(t)>18) s+=`<text x="${X(t)}" y="${Hh-8}" text-anchor="middle">${esc(day(t))}</text>`;
+  s+=`<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity=".5"/><text x="${X(now)+4}" y="${T+10}">now</text>${cw<600?'':`<text x="${X(x1)-4}" y="${T+10}" text-anchor="end">projected</text>`}`
     +`<path d="${path(p.series,1)}L${X(now)},${Y(0)}L${X(p.series[0][0])},${Y(0)}Z" fill="var(--s1)" opacity=".1"/>`
     +`<path d="${path(p.series,2)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round"/><path d="${path(p.series,1)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>`
     +`<path d="${path(p.projection,2)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-dasharray="6 5" opacity=".8"/><path d="${path(p.projection,1)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-dasharray="6 5" opacity=".8"/>`;
   for(let i=1;i<all.length;i++){const up=all[i][2]-all[i-1][2]; if(up>=1) s+=`<text x="${X(all[i][0])}" y="${Y(all[i][2])-6}" text-anchor="middle">+${Math.round(up)}</text>`}  // a weekly reset gave quota back
   for(const [i,c,dy] of [[1,'var(--s1)',18],[2,'var(--s2)',-9]])  // usage label below its dot, limit above
     s+=`<circle cx="${X(now)}" cy="${Y(last[i])}" r="4.5" fill="${c}" stroke="var(--surface)" stroke-width="2"/><text x="${X(now)-8}" y="${Y(last[i])+dy}" text-anchor="end" style="fill:var(--ink)">${Math.round(last[i])}%</text>`;
-  return s+`<line id="xh" x1="0" x2="0" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity="0"/></svg>`+sentence(p,now)}
+  return `<div class="wk">${y}</svg><div class="wk-scroll" id="wk-scroll">${s}<line id="xh" x1="0" x2="0" y1="${T}" y2="${Hh-B}" stroke="var(--ink2)" opacity="0"/></svg></div></div>`+sentence(p,now)}
 function sentence(p,now){
   const rate=p.rate_per_day==null?'':`At the current rate (${p.rate_per_day}% of a weekly quota per day), `;
   if(p.eta) return `<div class="sentence">${rate}every account ${p.eta<=now+60?'is at 100% now':'is spent at <b>'+esc(when(p.eta))+'</b>'}; quota returns at ${esc(when(p.back))} when ${esc(p.back_account)} resets.</div>`;
-  return `<div class="sentence">${p.note?esc(p.note):rate+'no shortfall in the next 7 days.'}</div>`}
+  return `<div class="sentence">${p.note?esc(p.note):rate+'no shortfall in the next 7.5 days.'}</div>`}
 $('weekly').onpointerdown=$('weekly').onpointermove=e=>{  // pointerdown: a tap on a touch screen
-  const svg=e.currentTarget.querySelector('svg'); if(!svg||!WK) return;
-  const r=svg.getBoundingClientRect(), t=WK.x0+((e.clientX-r.left)/r.width*WK.W-WK.L)/(WK.W-WK.L-WK.R)*(WK.x1-WK.x0);
+  const svg=e.currentTarget.querySelector('#wk-scroll svg'); if(!svg||!WK) return;
+  const r=svg.getBoundingClientRect(), t=WK.x0+(e.clientX-r.left)/WK.pps;
   let q=WK.all[0]; for(const p of WK.all) if(Math.abs(p[0]-t)<Math.abs(q[0]-t)) q=p;
-  const xh=svg.querySelector('#xh'), x=WK.L+(Math.max(q[0],WK.x0)-WK.x0)/(WK.x1-WK.x0)*(WK.W-WK.L-WK.R);
+  const xh=svg.querySelector('#xh'), x=(q[0]-WK.x0)*WK.pps;
   xh.setAttribute('x1',x); xh.setAttribute('x2',x); xh.setAttribute('opacity','.6');
   const tip=$('tip'); tip.replaceChildren();
   const head=document.createElement('div'); head.className='muted'; head.textContent=when(q[0])+(q[0]>WK.now?' · projected':''); tip.append(head);
@@ -1152,7 +1155,7 @@ async function refresh(){
   $('alerts').innerHTML=(stats.alerts||[]).map(a=>`<div class="banner ${a.level==='warn'?'warn':''}">&#9888; <span><b>${a.level==='warn'?'Warning':'Note'}</b> ${esc(a.text)}</span></div>`).join('');
   // headline figures
   const last=(wk.series||[]).slice(-1)[0], now=last?last[0]:Date.now()/1000;
-  $('hero').textContent=wk.eta?(wk.eta<=now+60?'now':dur(wk.eta-now)):wk.rate_per_day!=null?'> 7 days':'–';
+  $('hero').textContent=wk.eta?(wk.eta<=now+60?'now':dur(wk.eta-now)):wk.rate_per_day!=null?'> 7.5 days':'–';
   $('hero-sub').textContent=wk.eta?`${when(wk.eta)} · quota returns ${when(wk.back)} when ${wk.back_account} resets`:(wk.note||'no shortfall projected');
   $('k-left').textContent=last?Math.round(last[2]-last[1])+'%':'–'; $('k-left-sub').textContent=`of ${wk.capacity||0}% · ${accts.length} accounts`;
   $('k-rate').textContent=wk.rate_per_day!=null?wk.rate_per_day+'%':'–';
@@ -1166,7 +1169,9 @@ async function refresh(){
       +`<span class="muted small" style="margin-left:auto">upstream: ${esc(a.status||'n/a')} &middot; seen ${seen}</span></div>`
       +meter('5h',u5,st.switch_threshold,a.reset_5h_in_min>0?'resets in '+dur(a.reset_5h_in_min*60):'window idle')
       +meter('7d',u7,st.switch_threshold_7d,a.reset_7d_in_h>0?'resets in '+dur(a.reset_7d_in_h*H):'window idle')+'</div>'}).join('');
+  const sc=$('wk-scroll'), keep=sc&&sc.scrollWidth?sc.scrollWidth-sc.clientWidth-sc.scrollLeft:null;  // keep the view across redraws
   $('weekly').innerHTML=weekly(wk);
+  const nsc=$('wk-scroll'); if(nsc&&WK) nsc.scrollLeft=keep==null?WK.start:nsc.scrollWidth-nsc.clientWidth-keep;
   // devices: configured ones, then removed ones that still have history
   const roster=stats.devices||{}, gone=Object.keys((per.all||{}).device||{}).filter(n=>!(n in roster)&&n!=='?');
   let dh=`<tr><th>Device</th><th class="l">Status</th><th class="l">Last model</th><th>24 h</th><th>7 d</th><th>30 d</th><th>All time${per.since?' <span class="muted">since '+esc(per.since)+'</span>':''}</th><th>30-day trend</th></tr>`;

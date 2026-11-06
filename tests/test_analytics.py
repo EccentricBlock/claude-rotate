@@ -136,14 +136,14 @@ check("rate taken over the last 24 h; capacity sums the weights",
       out["rate_per_day"] == 48.0 and out["capacity"] == 200)
 proj = out["projection"]
 # b resets at +50 h with its week fully used (+100); everything is spent at +120 h and
-# usage pauses until a resets at +148 h (+100); then it resumes until the 7-day horizon.
-check("7-day projection steps the limit up at each reset",
+# usage pauses until a resets at +148 h (+100); then it resumes until the 7.5-day horizon.
+check("7.5-day projection steps the limit up at each reset",
       [p[2] for p in proj] == [290, 290, 390, 390, 390, 490, 490])
 check("projected usage pauses while every account is spent",
-      [p[1] for p in proj] == [150, 250, 250, 390, 390, 390, 430])
+      [p[1] for p in proj] == [150, 250, 250, 390, 390, 390, 454])
 check("ETA is the first shortfall; quota returns at a's reset",
       abs(out["eta"] - (now + 120 * H)) <= 5 and out["back"] == round(new_a)  # ts rounding
-      and out["back_account"] == "a" and proj[-1][0] == round(now + 7 * 86400))
+      and out["back_account"] == "a" and proj[-1][0] == round(now + 7.5 * 86400))
 
 weekly_state(0.95, 0.95)
 out = R.weekly_outlook(now)
