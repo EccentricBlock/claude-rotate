@@ -117,6 +117,17 @@ def test_panel_tailnet_needs_loopback_bind_and_a_bool():
     assert child.returncode == 0, child.stderr
 
 
+def test_refresh_idle_model_defaults_configures_and_must_be_a_nonempty_string():
+    show = "import json, rotator; print(json.loads(rotator.REFRESH_BODY)['model'])"
+    for cfg, model in (({}, "claude-haiku-4-5"),
+                       ({"refresh_idle_model": "claude-haiku-5-5"}, "claude-haiku-5-5")):
+        child = _import_with(cfg, show)
+        assert child.returncode == 0 and child.stdout.strip() == model, (cfg, child.stderr)
+    for bad in ("", "  ", 12, None, ["x"]):
+        child = _import_with({"refresh_idle_model": bad})
+        assert child.returncode != 0 and "refresh_idle_model" in child.stderr, (bad, child.stderr)
+
+
 def test_top_level_cap_lookahead_defaults_to_12h_and_must_parse():
     show = "import rotator; print(rotator.CAP_LOOKAHEAD_S)"
     for cfg, seconds in (({}, 43200), ({"cap_lookahead": "2d"}, 172800),

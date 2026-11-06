@@ -249,8 +249,12 @@ R._REFRESH_TRIED.clear()
 probes = []
 
 
+probe_models = []
+
+
 def probe_handler(req):
     probes.append((req.url.path, req.headers["authorization"], json.loads(req.content)["max_tokens"]))
+    probe_models.append(json.loads(req.content)["model"])
     return httpx.Response(200, headers=unified(u5="0.14", u7="0.69"))
 
 
@@ -258,6 +262,7 @@ use_upstream(probe_handler)
 asyncio.run(R.refresh_idle_accounts())
 check("refresh sends one 1-token request, to the idle account only",
       probes == [("/v1/messages", "Bearer tok-b", 1)])
+check("the probe body carries the default refresh_idle_model", probe_models == ["claude-haiku-4-5"])
 check("refresh records the idle account's real usage", R.STATE["accounts"]["b"]["util_7d"] == 0.69)
 check("refresh never changes the active account", R.STATE["active_account"] == "a")
 asyncio.run(R.refresh_idle_accounts())
@@ -271,6 +276,43 @@ asyncio.run(R.refresh_idle_accounts())
 asyncio.run(R.refresh_idle_accounts())
 check("headerless 429 (retired model) neither paces nor gets retried before the interval",
       "pace_until" not in R.STATE["accounts"].get("b", {}) and len(probes) == 1)
+
+fresh_state(active="a", accounts={"a": {"last_seen": time.time()}, "b": {}})
+R._REFRESH_TRIED.clear()
+probes.clear()
+R.ACCOUNTS["b"]["disabled"] = True
+try:
+    asyncio.run(R.refresh_idle_accounts())
+finally:
+    del R.ACCOUNTS["b"]["disabled"]
+check("a disabled idle account gets no probe", probes == [])
+
+# refresh_idle_s 0 = off. The guard lives in refresh_loop(), so drive one
+# iteration; the stubbed sleep ends the loop after it.
+R.HISTORY_PATH, R.USAGE_PATH = tmp / "usage_history.json", tmp / "device_usage.json"
+fresh_state(active="a", accounts={"a": {"last_seen": time.time(), "reset_7d": time.time() + 86400},
+                                  "b": {}})
+R.HISTORY.clear()
+R._REFRESH_TRIED.clear()
+probes.clear()
+use_upstream(lambda req: probes.append(1) or httpx.Response(200, headers=unified()))
+real_sleep, real_idle_s = R.asyncio.sleep, R.REFRESH_IDLE_S
+
+
+async def stop_loop(_seconds):
+    raise asyncio.CancelledError
+
+
+R.asyncio.sleep, R.REFRESH_IDLE_S = stop_loop, 0
+try:
+    asyncio.run(R.refresh_loop())
+    raise AssertionError("refresh_loop must end on the stubbed sleep")
+except asyncio.CancelledError:
+    pass
+finally:
+    R.asyncio.sleep, R.REFRESH_IDLE_S = real_sleep, real_idle_s
+check("refresh_idle_s 0: one loop iteration sends no probe", probes == [])
+check("refresh_idle_s 0: the loop still records history", R.HISTORY_PATH.exists())
 
 # --- 10. panel_tailnet: Tailscale Serve identity opens the panel, not the proxy
 ts = {"tailscale-user-login": "alice@example.com"}

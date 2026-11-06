@@ -219,6 +219,9 @@ if PANEL_TAILNET and CFG.get("bind", "127.0.0.1") not in ("127.0.0.1", "::1", "l
 CAP_LOOKAHEAD_S = duration_s(CFG.get("cap_lookahead", "12h"))
 if CAP_LOOKAHEAD_S is None:
     raise SystemExit("cap_lookahead must be an integer and one unit m, h or d, for example \"12h\"")
+REFRESH_IDLE_MODEL = CFG.get("refresh_idle_model", "claude-haiku-4-5")
+if not isinstance(REFRESH_IDLE_MODEL, str) or not REFRESH_IDLE_MODEL.strip():
+    raise SystemExit("refresh_idle_model must be a nonempty model name string")
 STORAGE_ERRORS: dict = {}
 
 
@@ -679,8 +682,9 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
 
 # Cheapest call that returns the unified headers on a setup-token: /api/oauth/usage
 # needs the user:profile scope and count_tokens omits them. A model the plan
-# can't use answers 429 with no headers, so replace this one when it retires.
-REFRESH_BODY = json.dumps({"model": "claude-haiku-4-5", "max_tokens": 1,
+# can't use answers 429 with no headers, so set refresh_idle_model when the
+# default retires.
+REFRESH_BODY = json.dumps({"model": REFRESH_IDLE_MODEL, "max_tokens": 1,
                            "messages": [{"role": "user", "content": "."}]}).encode()
 _REFRESH_TRIED: dict = {}
 
