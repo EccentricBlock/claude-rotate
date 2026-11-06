@@ -840,7 +840,7 @@ Based on clement-z `56ef19e`
 **Rotation policy**
 
 - Fixed [doxaras/claude-rotate#3](https://github.com/doxaras/claude-rotate/issues/3): the all-blocked fallback and the hold-until-reset wait rank accounts by when they can serve again, and a rejected account is never treated as usable on a stale reading.
-- Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account also used in chat is not drained before the working week ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
+- Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account needed for other purposes, such as chat through the week, is not drained too quickly ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
 - `accounts[].private_to` names one or more devices that alone may use an account; within its priority tier they use it before the shared accounts. `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token` takes a comma list and writes `priority: 1` for a new account ([74d23ae](https://github.com/mrglrlgrlgrl/claude-rotate/commit/74d23ae), [3da39c2](https://github.com/mrglrlgrlgrl/claude-rotate/commit/3da39c2), [fec60f9](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fec60f9), [af3fc70](https://github.com/mrglrlgrlgrl/claude-rotate/commit/af3fc70)).
 
 **Usage tracking**
