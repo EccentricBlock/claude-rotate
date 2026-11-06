@@ -127,19 +127,28 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-`tests/` needs a fixture config. Create it once; every file below is already
-git-ignored:
+`tests/` needs a fixture config. Build it in `$TMPDIR`, never at the repo
+root. Project settings deny reads of `./config.json` and `./tokens/`, and the
+sandbox mounts `/dev/null` over them, so a repo-root fixture works for one
+command and then fails with `PermissionError`. Run each line as its own call:
 
 ```
-cp config.example.json config.json
-mkdir -p tokens logs
-echo sk-ant-oat01-ci-dummy-token > tokens/acct-1.token
-echo sk-ant-oat01-ci-dummy-token > tokens/acct-2.token
-./setup.sh add-device ci-runner
+mkdir -p "$TMPDIR/cr-fixture/tokens" "$TMPDIR/cr-fixture/logs"
+cp setup.sh config.example.json "$TMPDIR/cr-fixture/"
+echo sk-ant-oat01-ci-dummy-token | tee "$TMPDIR/cr-fixture/tokens/acct-1.token" "$TMPDIR/cr-fixture/tokens/acct-2.token"
+"$TMPDIR/cr-fixture/setup.sh" add-device ci-runner
 ```
 
-Run `.venv/bin/python tests/run_all.py` before every commit that touches code.
-Run it unpiped: piping through `tail` replaces its exit code with `tail`'s.
+`setup.sh` changes to its own directory, so the copy edits the scratch config.
+Token paths resolve beside the config. Point the tests at the fixture:
+
+```
+CLAUDE_ROTATE_CONFIG="$TMPDIR/cr-fixture/config.json" CLAUDE_ROTATE_STATE="$TMPDIR/cr-fixture/state.json" CLAUDE_ROTATE_AUDIT="$TMPDIR/cr-fixture/logs/audit.jsonl" .venv/bin/python tests/run_all.py
+```
+
+Run that before every commit that touches code. Run it unpiped: piping
+through `tail` replaces its exit code with `tail`'s. Do not redirect its
+output to a `$VAR` path: `dcg` blocks it.
 
 Tests assert real outcomes: the output, the resulting state, the specific
 error for a bad input. A test that only checks the code ran is close to
