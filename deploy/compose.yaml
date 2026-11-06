@@ -1,0 +1,45 @@
+# claude-rotate under Docker Compose.
+#
+#   mkdir -p config/tokens data
+#   # put config.json in ./config and each token in ./config/tokens/<name>.token,
+#   # owned by the user below with mode 600
+#   docker compose up -d
+#
+# config.json needs "token_file" paths relative to ./config (tokens/acct-1.token)
+# and at least one real device key. Its "bind" is ignored: the image sets
+# CLAUDE_ROTATE_BIND=0.0.0.0, so "panel_tailnet" cannot be used here.
+#
+# Config and token edits are picked up within reload_poll_s seconds (5 by
+# default). To reload at once:  docker compose kill -s HUP claude-rotate
+services:
+  claude-rotate:
+    image: ghcr.io/mrglrlgrlgrl/claude-rotate:latest
+    # To build from a checkout instead:
+    # build: ..
+    # The owner of ./config and ./data. Tokens are mode 600, so the container
+    # has to run as the user that owns them.
+    user: "1000:1000"
+    restart: unless-stopped
+    # Devices authenticate with a key over plain HTTP: publish on loopback or a
+    # tailnet address, never a public one.
+    ports:
+      - "127.0.0.1:8484:8484"
+    volumes:
+      # Mount the directory, not config.json. An editor, setup.sh or the admin
+      # replaces the file, and a single-file mount keeps pointing at the old one.
+      - ./config:/config:ro
+      # state.json, usage_history.json, device_usage.json and audit.jsonl. A bind
+      # mount rather than a named volume, so that "user:" above can write to it.
+      - ./data:/data
+    # Let open streams finish before Docker stops the container.
+    stop_grace_period: 30s
+    # Tokens as Compose secrets instead of files under ./config/tokens. Set
+    # "token_file": "/run/secrets/acct-1" for the account in config.json.
+    # Compose mounts a secret as a single file, so replacing one needs
+    #   docker compose up -d --force-recreate
+    # secrets:
+    #   - acct-1
+
+# secrets:
+#   acct-1:
+#     file: ./secrets/acct-1.token

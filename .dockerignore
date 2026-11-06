@@ -1,0 +1,7 @@
+# An allowlist: config.json, tokens/, state, logs and everything else stay out
+# of the build context unless they are named here.
+*
+!rotator.py
+!oai_compat.py
+!requirements.lock
+!LICENSE

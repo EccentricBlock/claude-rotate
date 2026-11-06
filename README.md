@@ -608,6 +608,42 @@ For routine Debian service management, see the [operations quick guide](OPERATIO
   state/log directories, watchdog recovery, and conservative limits for a small
   VPS. `sudo ./uninstall.sh` removes it and keeps the configuration. Migration
   and rollback instructions are included.
+- **Docker**: see [Docker](#docker) below.
+
+### Docker
+
+The repository's `Dockerfile` builds a small image (Python 3.12, non-root user,
+dependencies from `requirements.lock`); every push to `main` publishes it to
+`ghcr.io/mrglrlgrlgrl/claude-rotate` for amd64 and arm64. A package GitHub
+creates is private until its owner makes it public in the package settings.
+[`deploy/compose.yaml`](deploy/compose.yaml) is a ready example:
+
+```sh
+mkdir -p config/tokens data
+# config.json in ./config, tokens in ./config/tokens (mode 600, owned by the
+# "user:" set in the compose file), then:
+docker compose up -d
+```
+
+- `/config` holds `config.json` and the tokens, mounted read-only. Mount the
+  directory, not the file: an editor or `setup.sh` replaces `config.json`, and a
+  single-file mount would keep serving the old one.
+- `/data` holds `state.json`, the usage files and `audit.jsonl`. Use a bind
+  mount, so the `user:` you set can write to it.
+- The image sets `CLAUDE_ROTATE_BIND=0.0.0.0`, because a container has to listen
+  on all its addresses; `bind` in `config.json` is ignored. That rules out
+  `panel_tailnet`, which needs a loopback bind. Publish the port on loopback or
+  a tailnet address only (`127.0.0.1:8484:8484` in the example).
+- Edits to the config or token files load by themselves within `reload_poll_s`
+  seconds. For an immediate reload: `docker compose kill -s HUP claude-rotate`.
+  A token supplied as a Compose `secrets:` entry (an absolute `token_file` such
+  as `/run/secrets/acct-1`) is a single-file mount, so replacing it needs
+  `docker compose up -d --force-recreate`. A Kubernetes Secret volume swaps its
+  files in place and is picked up like any other edit.
+- The same image runs as a sidecar next to a router: mount the config as a
+  ConfigMap and the tokens as a Secret.
+- `/rotate/status` needs a device key, so the image has no `HEALTHCHECK`.
+  Monitor it as described under [Operations](#operations).
 
 ## Troubleshooting
 
@@ -855,8 +891,9 @@ Roadmap, in intended order:
 - [ ] **In-process audit rotation** — roll `logs/audit.jsonl` past a size/age
       threshold so the Operations section's cron recipe becomes unnecessary,
       and stop re-reading the whole file per stats call (seek from the tail).
-- [ ] **Dockerfile** (+ compose example) — also enables running as a sidecar
-      next to a router in k8s; tokens mounted as secrets.
+- [x] **Dockerfile** (+ compose example) — also enables running as a sidecar
+      next to a router in k8s; tokens mounted as secrets. See
+      [Docker](#docker).
 - [x] **Hot config reload.** An mtime poll of `config.json` and the token
       files plus `SIGHUP`, in `rotator.py` (`reload_config`); see
       [Reloading the configuration](#reloading-the-configuration).

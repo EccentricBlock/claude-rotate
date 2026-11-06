@@ -34,6 +34,15 @@ and 0700 for the token directory. A token file or configuration manually edited
 outside setup must receive equivalent protection. Do not use `phase0_proxy.py`
 as a shared service: it is an unauthenticated, loopback-only diagnostic harness.
 
+In Docker, the image sets `CLAUDE_ROTATE_BIND=0.0.0.0`, which is the container's
+own address and not the host's. Publish the port on `127.0.0.1` or a Tailscale
+address (`deploy/compose.yaml` does), never on all host interfaces. `panel_tailnet`
+cannot be used there, because it needs a loopback bind. The container runs as an
+unprivileged user, and the config and token directory is mounted read-only; the
+tokens must be mode 600 and owned by that user, as in a standalone install. The
+build context is an allowlist (`.dockerignore`), so `config.json`, `tokens/` and
+state never enter an image.
+
 For Debian 12, use [the hardened systemd unit and installation guide](deploy/README.md).
 Its config/tokens are `0640 root:claude-rotate` inside private `0750` directories,
 readable only by root and the dedicated service group. The service can write its
