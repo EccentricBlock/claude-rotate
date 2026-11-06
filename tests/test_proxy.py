@@ -233,6 +233,9 @@ check("status needs auth", call(path="/rotate/status", key="nope", method="GET")
 r = call(path="/rotate/status", method="GET")
 check("status shape", r.status_code == 200 and r.json()["strategy"] == "consume-first"
       and "accounts" in r.json() and "series" in r.json()["weekly"])
+fresh_state(accounts={"a": {"reset_5h": 1793883600, "reset_7d": 1793883600}})
+acct =call(path="/rotate/status", method="GET").json()["accounts"]["a"]
+check("status returns raw reset epochs", acct["reset_5h"] == 1793883600 and acct["reset_7d"] == 1793883600)
 check("status auth via ?key=", call(path="/rotate/status?key=devkey-1", key=None,
                                     method="GET").status_code == 200)
 r = call(path="/rotate/stats", method="GET")

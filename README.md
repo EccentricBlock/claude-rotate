@@ -345,7 +345,8 @@ rate-limit headers:
   thresholds in `config.json`) sit in a banner above it.
 - **Accounts** — live 5-hour and weekly meters (from Anthropic's own headers)
   with a tick at the switch threshold, reset countdowns, upstream status and
-  the active account.
+  the active account. Hover a reset countdown for the exact reset time in your
+  browser's time zone and in UTC.
 - **Weekly quota, all accounts** — the enabled accounts' current weekly
   usage, summed (blue), against their combined capacity (orange: 100% per
   account, scaled by `accounts[].weight`). Usage drops at each account's weekly
