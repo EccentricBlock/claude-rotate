@@ -70,14 +70,34 @@ fork is not swept to match, so later merges stay clean.
 - Settle ambiguity up front by asking, so the work is a mechanical series of
   steps.
 
+## Keeping the README current
+
+A functional change updates the README in the same commit. A fix without its
+README update is not finished.
+
+- A functional change is a new or changed config key, default, endpoint,
+  `/rotate/status` field, panel feature, CLI or install step, or rotation
+  behaviour.
+- Put a config key in the "Configuration" table, with a default that matches
+  the code. Put behaviour in the section that describes it, such as "Rotation
+  policy", "Analytics panel", "OpenAI-compatible endpoint" or
+  "Troubleshooting".
+- Add a one-line bullet under "Fork changes", "mrglrlgrlgrl/claude-rotate",
+  that links the commit or PR. Docs-only, test-only and refactor commits get
+  no bullet.
+- A change to running or securing the service updates `OPERATIONS.md`,
+  `SECURITY.md` or `deploy/README.md` too, or instead.
+- New README prose follows the documentation style. Text around it is not
+  rewritten to match.
+
 ## Autonomy
 
 Commit and push without asking for low-impact changes. Each commit stays
 small and coherent.
 
 - **No need to ask.** Docs, tests, comments, config examples, and small fixes
-  that tests cover. A clean push (no force, no rewritten history) never needs
-  asking.
+  that tests cover, with their README update. A clean push (no force, no
+  rewritten history) never needs asking.
 - **Commit once the plan is approved; push when the tests pass.** Anything that
   changes rotation, auth, quota or proxy behaviour.
 - **Always ask first.**
@@ -141,6 +161,7 @@ lists the files the post-compact hook pastes back, one path per line. Read
 
 Read a file when its trigger applies.
 
+- Before committing a functional change: "Keeping the README current" above.
 - Before committing or pushing: `agents/git.md`.
 - Before writing prose in `AGENTS.md` or `agents/`:
   `agents/documentation-style.md`.
