@@ -22,7 +22,7 @@ def _load_with(cfg: dict):
     old_cfg, old_root = R.CONFIG_PATH, R.ROOT
     R.CONFIG_PATH, R.ROOT = tmp / "config.json", tmp
     try:
-        return R.load_config()
+        return R.load_config()[0]
     finally:
         R.CONFIG_PATH, R.ROOT = old_cfg, old_root
 
@@ -35,7 +35,7 @@ def test_placeholder_device_key_refuses_startup():
         _load_with({"accounts": ACCT,
                     "devices": {"my-laptop": "dev-my-laptop-REPLACE-WITH-RANDOM-HEX"}})
         raise AssertionError("placeholder key must refuse startup")
-    except SystemExit as e:
+    except R.ConfigError as e:
         assert "placeholder" in str(e), str(e)
 
 
@@ -56,7 +56,7 @@ def test_empty_and_duplicate_device_keys_refuse_startup():
         try:
             _load_with({"accounts": ACCT, "devices": devices})
             raise AssertionError("invalid device keys must refuse startup")
-        except SystemExit as error:
+        except R.ConfigError as error:
             assert "device" in str(error)
 
 
@@ -66,7 +66,7 @@ def test_account_weight_must_be_a_positive_number():
         try:
             _load_with({"accounts": [dict(ACCT[0], weight=w)], "devices": devices})
             raise AssertionError(f"weight {w!r} must refuse startup")
-        except SystemExit as error:
+        except R.ConfigError as error:
             assert "weight" in str(error)
     _load_with({"accounts": [dict(ACCT[0], weight=0.25)], "devices": devices})
 
@@ -77,7 +77,7 @@ def test_account_weekly_cap_must_be_a_number_from_0_to_1():
         try:
             _load_with({"accounts": [dict(ACCT[0], weekly_cap=cap)], "devices": devices})
             raise AssertionError(f"weekly_cap {cap!r} must refuse startup")
-        except SystemExit as error:
+        except R.ConfigError as error:
             assert "account 'a'" in str(error) and "weekly_cap" in str(error), str(error)
     for cap in (0, 0.5, 1):
         _load_with({"accounts": [dict(ACCT[0], weekly_cap=cap)], "devices": devices})
@@ -89,7 +89,7 @@ def test_account_cap_lookahead_must_parse():
         try:
             _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
             raise AssertionError(f"cap_lookahead {value!r} must refuse startup")
-        except SystemExit as error:
+        except R.ConfigError as error:
             assert "account 'a'" in str(error) and "cap_lookahead" in str(error), str(error)
     for value in ("30m", "12h", "2d"):
         _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
@@ -102,7 +102,7 @@ def test_account_private_to_must_name_registered_devices():
         try:
             _load_with({"accounts": [dict(ACCT[0], private_to=owner)], "devices": devices})
             raise AssertionError(f"private_to {owner!r} must refuse startup")
-        except SystemExit as error:
+        except R.ConfigError as error:
             assert "account 'a'" in str(error) and "private_to" in str(error), str(error)
     for owner in ("laptop", ["laptop"], ["laptop", "desk"]):
         cfg = _load_with({"accounts": [dict(ACCT[0], private_to=owner)], "devices": devices})

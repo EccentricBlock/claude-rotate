@@ -95,20 +95,43 @@ def duration_s(value) -> int | None:
     return int(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]] if m else None
 
 
-def load_config() -> dict:
+class ConfigError(Exception):
+    """A configuration the proxy refuses to run with."""
+
+
+def token_path(acct: dict) -> Path:
+    return CONFIG_PATH.parent / acct["token_file"]
+
+
+def file_stamp(path: Path):
+    """Identity of a file's current content, or None when it cannot be read.
+    stat() follows symlinks, so a swapped Kubernetes Secret link changes it."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def load_config() -> tuple[dict, tuple]:
+    """Read and validate config.json and its token files. Returns the config and
+    the (path, stamp) of every file it depends on, each stamped before it is read
+    so an edit during the read is seen again rather than missed."""
+    files = [(CONFIG_PATH, file_stamp(CONFIG_PATH))]
     cfg = json.loads(CONFIG_PATH.read_text())
     loaded = []
     for acct in cfg["accounts"]:
         w = acct.get("weight", 1)
         if type(w) not in (int, float) or not w > 0:
-            raise SystemExit(f"account '{acct['name']}': weight must be a number > 0")
+            raise ConfigError(f"account '{acct['name']}': weight must be a number > 0")
         cap = acct.get("weekly_cap")
         if "weekly_cap" in acct and (type(cap) not in (int, float) or not 0 <= cap <= 1):
-            raise SystemExit(f"account '{acct['name']}': weekly_cap must be a number from 0 to 1")
+            raise ConfigError(f"account '{acct['name']}': weekly_cap must be a number from 0 to 1")
         if "cap_lookahead" in acct and duration_s(acct["cap_lookahead"]) is None:
-            raise SystemExit(f"account '{acct['name']}': cap_lookahead must be an integer and "
+            raise ConfigError(f"account '{acct['name']}': cap_lookahead must be an integer and "
                              "one unit m, h or d, for example \"12h\"")
-        path = CONFIG_PATH.parent / acct["token_file"]
+        path = token_path(acct)
+        files.append((path, file_stamp(path)))
         if path.exists():
             acct["token"] = path.read_text().strip()
             loaded.append(acct)
@@ -116,7 +139,7 @@ def load_config() -> dict:
             print(f"warning: skipping account '{acct['name']}' — {acct['token_file']} not found",
                   file=sys.stderr)
     if not loaded:
-        raise SystemExit("no accounts with tokens configured — run: ./setup.sh add-account <name>")
+        raise ConfigError("no accounts with tokens configured — run: ./setup.sh add-account <name>")
     cfg["accounts"] = loaded
     # The example config ships a placeholder device key that is PUBLIC (it's in
     # the repo). It must never be accepted as a live credential: refuse to start
@@ -125,51 +148,131 @@ def load_config() -> dict:
     devices = cfg.get("devices")
     if not isinstance(devices, dict) or any(
             not isinstance(k, str) or not k.strip() for k in devices.values()):
-        raise SystemExit("devices must map names to nonempty device keys")
+        raise ConfigError("devices must map names to nonempty device keys")
     if len(set(devices.values())) != len(devices):
-        raise SystemExit("device keys must be unique")
+        raise ConfigError("device keys must be unique")
     for acct in cfg["accounts"]:
         if "private_to" in acct:
             names = acct["private_to"]
             names = [names] if isinstance(names, str) else names
             if (not isinstance(names, list) or not names or len(set(map(str, names))) != len(names)
                     or any(not isinstance(n, str) or n not in devices for n in names)):
-                raise SystemExit(f"account '{acct['name']}': private_to must be a device name "
+                raise ConfigError(f"account '{acct['name']}': private_to must be a device name "
                                  "or a list of distinct device names, all in devices{}")
     bad = [d for d, k in devices.items() if "REPLACE-WITH" in k]
     if bad:
-        raise SystemExit(
+        raise ConfigError(
             f"placeholder device key(s) in config.json: {', '.join(bad)} — the example "
             "value is public and must never be a valid credential. "
             "Run: ./setup.sh add-device <name> (it replaces the placeholder).")
-    return cfg
+    return cfg, tuple(files)
 
 
-CFG = load_config()
-
-
-def resource_limit(name: str, default: int, *, allow_zero=False, minimum=1) -> int:
+def resource_limit(cfg: dict, name: str, default: int, *, allow_zero=False, minimum=1) -> int:
     """Deployment overrides are non-secret; invalid limits fail at startup."""
-    value = CFG.get(name, default)
+    value = cfg.get(name, default)
     override = os.environ.get("CLAUDE_ROTATE_" + name.upper())
     if override is not None:
         try:
             value = int(override)
         except ValueError:
-            raise SystemExit(f"{name} must be an integer")
+            raise ConfigError(f"{name} must be an integer")
     lower = 0 if allow_zero else minimum
     if type(value) is not int or value < lower:
-        raise SystemExit(f"{name} must be an integer >= {lower}")
+        raise ConfigError(f"{name} must be an integer >= {lower}")
     return value
 
 
-MAX_REQUEST_BYTES = resource_limit("max_request_bytes", 32 * 1024 * 1024)
-MAX_RESPONSE_BYTES = resource_limit("max_response_bytes", 32 * 1024 * 1024)
-MAX_CONCURRENT_REQUESTS = resource_limit("max_concurrent_requests", 0, allow_zero=True)
-AUDIT_CACHE_RECORDS = resource_limit("audit_cache_records", 100_000)
-AUDIT_CACHE_BYTES = resource_limit("audit_cache_bytes", 32 * 1024 * 1024)
-AUDIT_MAX_BYTES = resource_limit("audit_max_bytes", 16 * 1024 * 1024, minimum=4096)
-AUDIT_BACKUPS = resource_limit("audit_backups", 4)
+# API list prices per MTok (input, output), matched by substring of the model id.
+# Cost columns are *API-equivalent* dollars: what this usage would cost pay-per-token.
+# Override in config.json under "prices_per_mtok".
+DEFAULT_PRICES = {
+    "fable": [10.0, 50.0], "mythos": [10.0, 50.0],
+    "opus": [5.0, 25.0],
+    "sonnet": [3.0, 15.0],
+    "haiku": [1.0, 5.0],
+}
+DEFAULT_ALERTS = {
+    "device_tokens_per_hour": 5_000_000,
+    "expensive_model_patterns": ["opus", "fable", "mythos"],
+    "util_warn": 0.8,
+}
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def settings(cfg: dict) -> dict:
+    """Validate a loaded config and return the module globals derived from it.
+    Pure: it raises ConfigError or returns everything, so a caller can apply the
+    whole set in one step."""
+    panel_tailnet = cfg.get("panel_tailnet", False)
+    if type(panel_tailnet) is not bool:
+        raise ConfigError("panel_tailnet must be true or false")
+    if panel_tailnet and cfg.get("bind", "127.0.0.1") not in LOOPBACK:
+        raise ConfigError("panel_tailnet needs bind 127.0.0.1 behind Tailscale Serve: on any other "
+                          "address a client could send Tailscale-User-Login itself and skip the key")
+    cap_lookahead = duration_s(cfg.get("cap_lookahead", "12h"))
+    if cap_lookahead is None:
+        raise ConfigError("cap_lookahead must be an integer and one unit m, h or d, for example \"12h\"")
+    model = cfg.get("refresh_idle_model", "claude-haiku-4-5")
+    if not isinstance(model, str) or not model.strip():
+        raise ConfigError("refresh_idle_model must be a nonempty model name string")
+    return {
+        "CFG": cfg,
+        "DEVICE_BY_KEY": {v: k for k, v in cfg["devices"].items()},
+        "ACCOUNTS": {a["name"]: a for a in cfg["accounts"]},
+        "MAX_REQUEST_BYTES": resource_limit(cfg, "max_request_bytes", 32 * 1024 * 1024),
+        "MAX_RESPONSE_BYTES": resource_limit(cfg, "max_response_bytes", 32 * 1024 * 1024),
+        "MAX_CONCURRENT_REQUESTS": resource_limit(cfg, "max_concurrent_requests", 0, allow_zero=True),
+        "AUDIT_CACHE_RECORDS": resource_limit(cfg, "audit_cache_records", 100_000),
+        "AUDIT_CACHE_BYTES": resource_limit(cfg, "audit_cache_bytes", 32 * 1024 * 1024),
+        "AUDIT_MAX_BYTES": resource_limit(cfg, "audit_max_bytes", 16 * 1024 * 1024, minimum=4096),
+        "AUDIT_BACKUPS": resource_limit(cfg, "audit_backups", 4),
+        "THRESHOLD": cfg.get("switch_threshold", 0.8),
+        "THRESHOLD_7D": cfg.get("switch_threshold_7d", 0.98),
+        # "consume-first" / "least-used" / "most-weekly-left" / "weekly-pace"
+        "STRATEGY": cfg.get("strategy", "consume-first"),
+        "COOLDOWN_S": cfg.get("switch_cooldown_s", 300),
+        "SWITCH_MARGIN": cfg.get("switch_margin", 0.05),
+        "SWITCH_MARGIN_7D": cfg.get("switch_margin_7d", 0.03),  # most-weekly-left hysteresis
+        "PACE_RATIO": cfg.get("pace_ratio", 1.25),  # weekly-pace hysteresis (multiplicative)
+        "RESERVE_SESSIONS": cfg.get("reserve_sessions", 1),  # weekly-pace: fallbacks to keep
+        "RESERVE_HEADROOM": cfg.get("reserve_headroom", 0.03),  # room a fallback needs in both windows
+        "CF_MARGIN_S": cfg.get("consume_first_margin_s", 3600),
+        # Above the switch thresholds an account is held in reserve, not dropped: it
+        # stays usable up to HARD_LIMIT (Anthropic rejects at 1.0) for emergencies
+        # (nothing else under its thresholds) and is spent on purpose once the window
+        # holding it there resets within the spend horizon (use it or lose it).
+        "HARD_LIMIT": cfg.get("hard_limit", 1.0),
+        "RESERVE_SPEND_5H_S": cfg.get("reserve_spend_5h_s", 3600),
+        "RESERVE_SPEND_7D_S": cfg.get("reserve_spend_7d_s", 43200),
+        "HOLD_MAX_S": cfg.get("hold_max_s", 0),  # 0 = return 429 when every account is spent
+        "REFRESH_IDLE_S": resource_limit(cfg, "refresh_idle_s", 1800, allow_zero=True),  # 0 = off
+        "PANEL_TAILNET": panel_tailnet,
+        "CAP_LOOKAHEAD_S": cap_lookahead,
+        "REFRESH_IDLE_MODEL": model,
+        # Cheapest call that returns the unified headers on a setup-token: /api/oauth/usage
+        # needs the user:profile scope and count_tokens omits them. A model the plan
+        # can't use answers 429 with no headers, so set refresh_idle_model when the
+        # default retires.
+        "REFRESH_BODY": json.dumps({"model": model, "max_tokens": 1,
+                                    "messages": [{"role": "user", "content": "."}]}).encode(),
+        # A closed/free account (403/404) is marked bad and skipped. The mark must not be
+        # permanent (a plan can be renewed, a block lifted), so an account is reconsidered
+        # BAD_RECOVER_S after it was last marked bad — doubling each time it refuses again
+        # (bad_count), capped at BAD_RECOVER_MAX_S — and only a 200 fully clears it.
+        # 0 = never reconsider.
+        "BAD_RECOVER_S": cfg.get("bad_recover_s", 600),
+        "BAD_RECOVER_MAX_S": cfg.get("bad_recover_max_s", 86400),
+        "PRICES": cfg.get("prices_per_mtok", DEFAULT_PRICES),
+        "ALERT_CFG": cfg.get("alerts", DEFAULT_ALERTS),
+    }
+
+
+try:
+    _cfg, CONFIG_FILES = load_config()
+    globals().update(settings(_cfg))
+except ConfigError as exc:
+    raise SystemExit(str(exc))
 
 
 class RequestAdmission:
@@ -197,39 +300,6 @@ class RequestAdmission:
 
 app.add_middleware(RequestAdmission, limit=MAX_CONCURRENT_REQUESTS)
 app.add_middleware(PrivateResponseHeaders)
-DEVICE_BY_KEY = {v: k for k, v in CFG["devices"].items()}
-ACCOUNTS = {a["name"]: a for a in CFG["accounts"]}
-THRESHOLD = CFG.get("switch_threshold", 0.8)
-THRESHOLD_7D = CFG.get("switch_threshold_7d", 0.98)
-STRATEGY = CFG.get("strategy", "consume-first")  # or "least-used" / "most-weekly-left" / "weekly-pace"
-COOLDOWN_S = CFG.get("switch_cooldown_s", 300)
-SWITCH_MARGIN = CFG.get("switch_margin", 0.05)
-SWITCH_MARGIN_7D = CFG.get("switch_margin_7d", 0.03)  # most-weekly-left hysteresis
-PACE_RATIO = CFG.get("pace_ratio", 1.25)  # weekly-pace hysteresis (multiplicative)
-RESERVE_SESSIONS = CFG.get("reserve_sessions", 1)  # weekly-pace: fallbacks to keep
-RESERVE_HEADROOM = CFG.get("reserve_headroom", 0.03)  # room a fallback needs in both windows
-CF_MARGIN_S = CFG.get("consume_first_margin_s", 3600)
-# Above the switch thresholds an account is held in reserve, not dropped: it
-# stays usable up to HARD_LIMIT (Anthropic rejects at 1.0) for emergencies
-# (nothing else under its thresholds) and is spent on purpose once the window
-# holding it there resets within the spend horizon (use it or lose it).
-HARD_LIMIT = CFG.get("hard_limit", 1.0)
-RESERVE_SPEND_5H_S = CFG.get("reserve_spend_5h_s", 3600)
-RESERVE_SPEND_7D_S = CFG.get("reserve_spend_7d_s", 43200)
-HOLD_MAX_S = CFG.get("hold_max_s", 0)  # 0 = return 429 when every account is spent
-REFRESH_IDLE_S = resource_limit("refresh_idle_s", 1800, allow_zero=True)  # 0 = off
-PANEL_TAILNET = CFG.get("panel_tailnet", False)
-if type(PANEL_TAILNET) is not bool:
-    raise SystemExit("panel_tailnet must be true or false")
-if PANEL_TAILNET and CFG.get("bind", "127.0.0.1") not in ("127.0.0.1", "::1", "localhost"):
-    raise SystemExit("panel_tailnet needs bind 127.0.0.1 behind Tailscale Serve: on any other "
-                     "address a client could send Tailscale-User-Login itself and skip the key")
-CAP_LOOKAHEAD_S = duration_s(CFG.get("cap_lookahead", "12h"))
-if CAP_LOOKAHEAD_S is None:
-    raise SystemExit("cap_lookahead must be an integer and one unit m, h or d, for example \"12h\"")
-REFRESH_IDLE_MODEL = CFG.get("refresh_idle_model", "claude-haiku-4-5")
-if not isinstance(REFRESH_IDLE_MODEL, str) or not REFRESH_IDLE_MODEL.strip():
-    raise SystemExit("refresh_idle_model must be a nonempty model name string")
 STORAGE_ERRORS: dict = {}
 
 
@@ -243,13 +313,8 @@ def storage_error(operation: str, error: Exception) -> None:
         prior["last_warning"] = now
     prior.update(count=prior.get("count", 0) + 1, last_failure=now)
     STORAGE_ERRORS[operation] = prior
-# A closed/free account (403/404) is marked bad and skipped. The mark must not be
-# permanent (a plan can be renewed, a block lifted), so an account is reconsidered
-# BAD_RECOVER_S after it was last marked bad — doubling each time it refuses again
-# (bad_count), capped at BAD_RECOVER_MAX_S — and only a 200 fully clears it.
-# 0 = never reconsider.
-BAD_RECOVER_S = CFG.get("bad_recover_s", 600)
-BAD_RECOVER_MAX_S = CFG.get("bad_recover_max_s", 86400)
+
+
 BAD_KEYS = ("bad_status", "last_bad_seen", "bad_count")
 
 
@@ -742,12 +807,6 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
         return verdict
 
 
-# Cheapest call that returns the unified headers on a setup-token: /api/oauth/usage
-# needs the user:profile scope and count_tokens omits them. A model the plan
-# can't use answers 429 with no headers, so set refresh_idle_model when the
-# default retires.
-REFRESH_BODY = json.dumps({"model": REFRESH_IDLE_MODEL, "max_tokens": 1,
-                           "messages": [{"role": "user", "content": "."}]}).encode()
 _REFRESH_TRIED: dict = {}
 
 
@@ -1014,21 +1073,7 @@ async def bounded_response(upstream: httpx.Response) -> bytes:
     return bytes(body)
 
 
-# API list prices per MTok (input, output), matched by substring of the model id.
-# Cost columns are *API-equivalent* dollars: what this usage would cost pay-per-token.
-# Override in config.json under "prices_per_mtok".
-PRICES = CFG.get("prices_per_mtok", {
-    "fable": [10.0, 50.0], "mythos": [10.0, 50.0],
-    "opus": [5.0, 25.0],
-    "sonnet": [3.0, 15.0],
-    "haiku": [1.0, 5.0],
-})
 DEFAULT_PRICE = [5.0, 25.0]
-ALERT_CFG = CFG.get("alerts", {
-    "device_tokens_per_hour": 5_000_000,
-    "expensive_model_patterns": ["opus", "fable", "mythos"],
-    "util_warn": 0.8,
-})
 
 
 def price_for(model: str | None) -> list[float]:
