@@ -567,8 +567,17 @@ def read_token(args) -> str:
     return token
 
 
+def set_private(acct: dict, device: str) -> None:
+    """Reserve an account for one device, at the top priority tier (as
+    setup.sh add-account --private-to does)."""
+    acct["private_to"] = device
+    acct["priority"] = 1
+
+
 def cmd_add_token(args) -> int:
     validate_name(args.name, "account name")
+    if args.private_to is not None:
+        validate_name(args.private_to, "device name")
     token = read_token(args)
     uid, gid = owner_uid(), service_ids()[1]
     with AdminLock():
@@ -576,6 +585,9 @@ def cmd_add_token(args) -> int:
         cfg = load_config()
         if not TOKENS.is_dir():
             raise Refused(f"{TOKENS} is missing; run install.sh (or claude-rotate-admin init)")
+        if args.private_to is not None and args.private_to not in cfg["devices"]:
+            raise Refused(f"device '{args.private_to}' is not registered; "
+                          f"run: claude-rotate-admin add-user {args.private_to}")
         existing = next((a for a in cfg["accounts"] if a["name"] == args.name), None)
         if existing is not None:
             path = token_path(existing)
@@ -583,6 +595,9 @@ def cmd_add_token(args) -> int:
                 raise Refused(f"account '{args.name}' uses token_file {existing['token_file']!r}, "
                               f"which is not a regular file inside {TOKENS}; fix the config first")
             write_private_file(path, token, 0o640, uid, gid)
+            if args.private_to is not None:
+                set_private(existing, args.private_to)
+                write_config(cfg)
             out(f"token for account '{args.name}' replaced ({path})")
             what = f"renewed token for '{args.name}'"
         else:
@@ -590,7 +605,10 @@ def cmd_add_token(args) -> int:
             if path.exists() or path.is_symlink():
                 raise Refused(f"{path} already exists but no account uses it; remove it first")
             write_private_file(path, token, 0o640, uid, gid)
-            cfg["accounts"].append({"name": args.name, "token_file": f"tokens/{args.name}.token"})
+            acct = {"name": args.name, "token_file": f"tokens/{args.name}.token"}
+            if args.private_to is not None:
+                set_private(acct, args.private_to)
+            cfg["accounts"].append(acct)
             write_config(cfg)
             out(f"account '{args.name}' added ({path})")
             what = f"account '{args.name}'"
@@ -637,6 +655,10 @@ def cmd_remove_user(args) -> int:
         cfg = load_config()
         if args.name not in cfg["devices"]:
             raise Refused(f"device '{args.name}' does not exist; nothing changed")
+        owned = [a["name"] for a in cfg["accounts"] if a.get("private_to") == args.name]
+        if owned:
+            raise Refused(f"account(s) {', '.join(owned)} are private to '{args.name}'; "
+                          "remove them or clear private_to first")
         del cfg["devices"][args.name]
         write_config(cfg)
         out(f"device '{args.name}' removed from the configuration")
@@ -966,6 +988,8 @@ def build_parser():
             "an existing account gets its token replaced", aliases=("add-account",))
     p.add_argument("name", metavar="NAME")
     p.add_argument("--token-file", help="read the token from this file instead of the prompt/stdin")
+    p.add_argument("--private-to", metavar="DEVICE",
+                   help="reserve the account for this registered device, at priority 1")
     p.add_argument("--no-restart", action="store_true", help="store only; do not touch the service")
     p = add("add-user", cmd_add_user, "mint a device key and print the client settings", aliases=("add-device",))
     p.add_argument("name", metavar="NAME")

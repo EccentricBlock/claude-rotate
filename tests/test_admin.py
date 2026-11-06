@@ -195,6 +195,31 @@ def test_add_user_activation_and_duplicates(f):
     assert f.cfg()["devices"]["alice-laptop"] == key
 
 
+def test_private_to_flag_and_device_removal_guard(f):
+    accounts_before = f.cfg()["accounts"]
+    # An unregistered or badly named device is refused without touching anything.
+    config_before = f.config.read_bytes()
+    for device, message in (("ghost", "not registered"), ("bad name", "device name")):
+        r = f.run("add-token", "acct-priv", "--private-to", device, "--no-restart", input=TOKEN + "\n")
+        assert r.returncode == 1 and message in r.stderr, (device, r)
+        assert f.config.read_bytes() == config_before and not (f.tokens / "acct-priv.token").exists()
+    # A private account is reserved for its device at priority 1.
+    r = f.run("add-token", "acct-priv", "--private-to", "alice-laptop", "--no-restart", input=TOKEN + "\n")
+    assert r.returncode == 0, r
+    assert f.cfg()["accounts"][-1] == {"name": "acct-priv", "token_file": "tokens/acct-priv.token",
+                                       "private_to": "alice-laptop", "priority": 1}
+    # Renewing the token without the flag leaves the reservation alone.
+    r = f.run("add-token", "acct-priv", "--no-restart", input=TOKEN + "\n")
+    assert r.returncode == 0 and f.cfg()["accounts"][-1]["private_to"] == "alice-laptop", r
+    # Its device cannot be removed while it owns the account: startup would fail.
+    config_before = f.config.read_bytes()
+    r = f.run("remove-user", "alice-laptop", "--no-restart")
+    assert r.returncode == 1 and "acct-priv" in r.stderr and "private to" in r.stderr, r
+    assert f.config.read_bytes() == config_before
+    r = f.run("remove-token", "acct-priv", "--no-restart")
+    assert r.returncode == 0 and f.cfg()["accounts"] == accounts_before, r
+
+
 def test_readiness_needs_enabled_nonempty_token(f):
     cfg = f.cfg()
     saved = json.dumps(cfg)
@@ -502,7 +527,7 @@ def main():
     f = Fixture()
     order = ["test_init_creates_empty_config_and_modes", "test_invalid_names_do_nothing",
              "test_add_token_and_renewal", "test_add_user_activation_and_duplicates",
-             "test_readiness_needs_enabled_nonempty_token", "test_inherited_lock_descriptor",
+             "test_private_to_flag_and_device_removal_guard", "test_readiness_needs_enabled_nonempty_token", "test_inherited_lock_descriptor",
              "test_restart_failure_is_reported", "test_concurrent_add_users_are_serialized",
              "test_status_has_no_secrets", "test_status_live_query_uses_header",
              "test_rotate_rejections_do_not_mutate", "test_rotate_switches_after_stop_and_preserves_state",
