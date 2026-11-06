@@ -7,7 +7,7 @@
 #   ./setup.sh add-account <name>    store a `claude setup-token` for an account
 #                                    (--private-to <device>[,<device>...] reserves it
 #                                    for those devices)
-#   ./setup.sh onboard <user> <dev>  team flow: mint <user>-<dev> key, restart the
+#   ./setup.sh onboard <user> <dev>  team flow: mint <user>-<dev> key, reload the
 #                                    service, print a paste-ready welcome block
 #                                    (uses config.json "public_url" when set)
 set -euo pipefail
@@ -71,12 +71,17 @@ init)
 add-device)
     key="dev-${name}-$(openssl rand -hex 8)"
     python3 - "$name" "$key" <<'EOF'
-import json, sys
+import json, os, sys
 cfg = json.load(open("config.json"))
 cfg.setdefault("devices", {})
 cfg["devices"] = {k: v for k, v in cfg["devices"].items() if "REPLACE-WITH" not in v}
 cfg["devices"][sys.argv[1]] = sys.argv[2]
-json.dump(cfg, open("config.json", "w"), indent=2)
+# Write, then rename: a running proxy that notices the change must never read
+# a half-written file.
+path = os.path.realpath("config.json")
+with open(path + ".tmp", "w") as f:
+    json.dump(cfg, f, indent=2)
+os.replace(path + ".tmp", path)
 EOF
     url=$(python3 -c "import json; print(json.load(open('config.json')).get('public_url') or 'http://<this-host>:8484')")
     echo "device '$name' registered. On that machine set:"
@@ -87,7 +92,7 @@ onboard)
     # Team flow: a member sends you their username + device name; you run
     #   ./setup.sh onboard <username> <device>
     # and paste the printed block back to them. Mints the key as
-    # <username>-<device>, restarts the service so it's live immediately.
+    # <username>-<device>, reloads the service so it's live immediately.
     if python3 -c "import json,sys; sys.exit(0 if sys.argv[1] in json.load(open('config.json')).get('devices', {}) else 1)" "$name"; then
         echo "error: device '$name' already exists — revoke it first (delete from config.json) or pick another name" >&2
         exit 1
@@ -96,17 +101,17 @@ onboard)
     key=$(python3 -c "import json,sys; print(json.load(open('config.json'))['devices'][sys.argv[1]])" "$name")
     url=$(python3 -c "import json; print(json.load(open('config.json')).get('public_url') or 'http://<this-host>:8484')")
     if command -v systemctl > /dev/null && systemctl is-active --quiet claude-rotate 2> /dev/null; then
-        # non-root operators need sudo for the restart; -n so we fail into the
+        # non-root operators need sudo for the reload; -n so we fail into the
         # hint instead of hanging on a password prompt (set -e must not kill
         # the block before the key is printed)
-        if systemctl restart claude-rotate 2> /dev/null \
-                || sudo -n systemctl restart claude-rotate 2> /dev/null; then
-            echo "(service restarted — key is live)"
+        if systemctl reload claude-rotate 2> /dev/null \
+                || sudo -n systemctl reload claude-rotate 2> /dev/null; then
+            echo "(reload sent to the service — key is live; if it is refused, see config.error in /rotate/status)"
         else
-            echo "(key stored but NOT live — run: sudo systemctl restart claude-rotate)"
+            echo "(key stored; the service loads it within reload_poll_s seconds, or run: sudo systemctl reload claude-rotate)"
         fi
     else
-        echo "(restart rotator.py to activate the key)"
+        echo "(a running rotator.py loads the key within reload_poll_s seconds, or on SIGHUP)"
     fi
     echo
     echo "──── paste this back to $user ────────────────────────────────"
@@ -137,11 +142,14 @@ add-account)
     read -r -s -p "then paste the sk-ant-oat01-... token here (input hidden): " token
     echo
     case "$token" in sk-ant-oat01-*) ;; *) echo "error: token should start with sk-ant-oat01-" >&2; exit 1;; esac
-    if [ -e "tokens/${name}.token" ]; then chmod 600 "tokens/${name}.token"; fi
-    printf '%s' "$token" > "tokens/${name}.token"
-    chmod 600 "tokens/${name}.token"
+    # Write, then rename: a running proxy that notices the change must never
+    # read an empty or half-written token.
+    tmp="tokens/.${name}.token.tmp"
+    printf '%s' "$token" > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "tokens/${name}.token"
     python3 - "$name" "$priv" <<'EOF'
-import json, sys
+import json, os, sys
 name, priv = sys.argv[1], sys.argv[2]
 cfg = json.load(open("config.json"))
 acct = next((a for a in cfg["accounts"] if a["name"] == name), None)
@@ -154,12 +162,15 @@ if priv:
     acct.setdefault("priority", 1)  # written out, so the owners spend it first
 else:
     acct.pop("private_to", None)
-json.dump(cfg, open("config.json", "w"), indent=2)
+path = os.path.realpath("config.json")
+with open(path + ".tmp", "w") as f:
+    json.dump(cfg, f, indent=2)
+os.replace(path + ".tmp", path)
 EOF
     if [ -n "$priv" ]; then
-        echo "account '$name' stored (private to: ${priv//,/, }). Restart rotator.py to load it."
+        echo "account '$name' stored (private to: ${priv//,/, }). A running rotator.py loads it within reload_poll_s seconds, or on SIGHUP."
     else
-        echo "account '$name' stored. Restart rotator.py to load it."
+        echo "account '$name' stored. A running rotator.py loads it within reload_poll_s seconds, or on SIGHUP."
     fi
     ;;
 *)

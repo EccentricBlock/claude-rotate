@@ -51,6 +51,22 @@ def main():
                                  text=True, capture_output=True, check=True).stdout.splitlines()
         assert decoded[0] == cfg["public_url"]
         assert decoded[1] == json.loads(cfg_path.read_text())["devices"]["alice-desktop"]
+        # No active service: the key is picked up by a running rotator.py's poll or SIGHUP.
+        assert "reload_poll_s" in added.stdout and "restart rotator.py" not in added.stdout, added.stdout
+
+        # An active service is reloaded, not restarted, so open streams survive.
+        calls = root / "systemctl.calls"
+        live_bin = root / "live-bin"
+        live_bin.mkdir()
+        (live_bin / "systemctl").write_text(f'#!/bin/sh\necho "$@" >> "{calls}"\nexit 0\n')
+        (live_bin / "systemctl").chmod(0o700)
+        live_env = dict(env, PATH=str(live_bin) + os.pathsep + env["PATH"])
+        live = subprocess.run([str(root / "setup.sh"), "onboard", "bob", "phone"], env=live_env,
+                              text=True, capture_output=True)
+        assert live.returncode == 0, live.stderr
+        assert calls.read_text().splitlines() == ["is-active --quiet claude-rotate",
+                                                  "reload claude-rotate"], calls.read_text()
+        assert "reload sent" in live.stdout and "restart" not in live.stdout, live.stdout
         before = cfg_path.read_bytes()
         assert run("onboard", "alice", "desktop").returncode != 0
         assert cfg_path.read_bytes() == before
@@ -72,6 +88,11 @@ def main():
         assert run("add-account", "priv-account", "--private-to", both, input=token).returncode == 0
         accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
         assert accounts["priv-account"]["private_to"] == ["Alice_01-laptop", "alice-desktop"]
+
+        # Config and tokens are written then renamed; no temporary file is left behind.
+        assert not (root / "config.json.tmp").exists()
+        assert not list((root / "tokens").glob(".*.tmp"))
+        assert (root / "tokens/priv-account.token").read_text() == "sk-ant-oat01-dummy-test"
         print("setup security checks passed")
 
 
