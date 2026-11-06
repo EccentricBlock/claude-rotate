@@ -375,7 +375,7 @@ The 24 h figures come from the audit log. Longer periods come from
 minute. On first start it is rebuilt once from `audit.jsonl` and its rotated
 copies, so all time reaches back as far as those logs do.
 
-JSON endpoints: `/rotate/status` (accounts, each with its `private_to` owner or null, + switch events) and
+JSON endpoints: `/rotate/status` (accounts, each with its `private_to` owners as a list or null, + switch events) and
 `/rotate/stats` (rollups, alerts and the longer `periods`), same `?key=` or `Authorization: Bearer`
 auth. Audit trail: `logs/audit.jsonl`, one JSON record per request.
 
@@ -405,7 +405,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `devices{}` | `name → device key`; key is what the device puts in `CLAUDE_CODE_OAUTH_TOKEN` |
 | `accounts[].priority` | lower = preferred; accounts form tiers, backup tiers only used when every preferred account is spent (default 100) |
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
-| `accounts[].private_to` | a device name: the account is served *only* to that device; every other device never touches it. `add-account --private-to` (`setup.sh` and `claude-rotate-admin`) also sets `priority` to 1. See "Preferring one account over another". |
+| `accounts[].private_to` | a device name, or a list of device names: the account is served *only* to those devices; every other device never touches it. `add-account --private-to` (`setup.sh` and `claude-rotate-admin`) also sets `priority` to 1. See "Preferring one account over another". |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
 | `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
 | `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
@@ -524,8 +524,9 @@ Combine with `strategy` for the remaining temperament choice: `consume-first`
 `most-weekly-left` (always ride the account with the most weekly quota left) or
 `weekly-pace` (spend the quota likeliest to expire, keeping a fresh session in reserve).
 
-**Level 3 — pin an account to a device.** `"private_to": "<device name>"` marks
-an account as belonging to one device: it is served *only* to that device. The
+**Level 3 — pin an account to devices.** `"private_to": "<device name>"` (or a
+list, `["laptop", "desktop"]`) marks an account as belonging to those devices: it
+is served *only* to them, and they share it. The
 owner competes for it like any other account, by `priority` (Level 1); every
 other device is never routed to it. `./setup.sh add-account --private-to` sets
 `priority` to 1, so the owner spends their own quota before the shared pool; a

@@ -129,11 +129,14 @@ def load_config() -> dict:
     if len(set(devices.values())) != len(devices):
         raise SystemExit("device keys must be unique")
     for acct in cfg["accounts"]:
-        if "private_to" in acct and (not isinstance(acct["private_to"], str)
-                                     or acct["private_to"] not in devices):
-            raise SystemExit(f"account '{acct['name']}': private_to must name a device "
-                             "in devices{}")
-    bad =[d for d, k in devices.items() if "REPLACE-WITH" in k]
+        if "private_to" in acct:
+            names = acct["private_to"]
+            names = [names] if isinstance(names, str) else names
+            if (not isinstance(names, list) or not names or len(set(map(str, names))) != len(names)
+                    or any(not isinstance(n, str) or n not in devices for n in names)):
+                raise SystemExit(f"account '{acct['name']}': private_to must be a device name "
+                                 "or a list of distinct device names, all in devices{}")
+    bad = [d for d, k in devices.items() if "REPLACE-WITH" in k]
     if bad:
         raise SystemExit(
             f"placeholder device key(s) in config.json: {', '.join(bad)} — the example "
@@ -452,17 +455,18 @@ def usable(name: str) -> bool:
     return under_threshold(name) or reserve_spendable(name)
 
 
-def private_to(name: str) -> str | None:
-    """Device name this account is reserved for, or None if every device may use it."""
-    return ACCOUNTS[name].get("private_to")
+def owners(name: str) -> list[str]:
+    """Device names this account is reserved for; empty if every device may use it."""
+    value = ACCOUNTS[name].get("private_to") or []
+    return [value] if isinstance(value, str) else list(value)
 
 
 def available_to(name: str, device: str | None) -> bool:
     """A shared account (no private_to) serves any device; a private one serves
-    only its owner. device=None means no scoping: everything is available (the
+    only its owners. device=None means no scoping: everything is available (the
     device-less rotation logic and the offline tests)."""
-    owner = private_to(name)
-    return owner is None or device is None or owner == device
+    own = owners(name)
+    return not own or device is None or device in own
 
 
 def device_current(device: str | None) -> str | None:
@@ -931,7 +935,7 @@ async def rotate_status(request: Request):
         info["effective_util_7d"] = util_7d(name)
         info["priority"] = priority(name)
         info["disabled"] = disabled(name)
-        info["private_to"] = private_to(name)
+        info["private_to"] = owners(name) or None
         info["account_bad"] = account_bad(name)
         info["on_probation"] = on_probation(name)
         if account_bad(name) and bad_recover_wait(name):
@@ -1489,7 +1493,7 @@ async function refresh(){
   $('accounts').innerHTML=accts.map(([name,a])=>{const u5=a.effective_util_5h||0, u7=a.effective_util_7d||0;
     const seen=a.last_seen?ago(Math.round((Date.now()/1000-a.last_seen)/60)):'never';
     return `<div class="card"><div class="acct-head"><b>${esc(name)}</b>${name===st.active_account?'<span class="badge"><span class="dot" style="background:var(--good)"></span>active</span>':''}`
-      +(a.disabled?'<span class="badge">disabled</span>':'')+(a.private_to?`<span class="badge">private to ${esc(a.private_to)}</span>`:'')+(a.priority!==100?`<span class="badge">prio ${esc(a.priority)}</span>`:'')
+      +(a.disabled?'<span class="badge">disabled</span>':'')+(a.private_to?`<span class="badge">private to ${esc([].concat(a.private_to).join(', '))}</span>`:'')+(a.priority!==100?`<span class="badge">prio ${esc(a.priority)}</span>`:'')
       +`<span class="muted small" style="margin-left:auto">upstream: ${esc(a.status||'n/a')} &middot; seen ${seen}</span></div>`
       +meter('5h',u5,st.switch_threshold,a.reset_5h_in_min>0?'resets in '+dur(a.reset_5h_in_min*60):'window idle',a.reset_5h_in_min>0&&a.reset_5h)
       +meter('7d',u7,st.switch_threshold_7d,a.reset_7d_in_h>0?'resets in '+dur(a.reset_7d_in_h*H):'window idle',a.reset_7d_in_h>0&&a.reset_7d)+'</div>'}).join('');

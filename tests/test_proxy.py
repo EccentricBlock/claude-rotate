@@ -242,7 +242,13 @@ try:
     acct = call(path="/rotate/status", method="GET").json()["accounts"]["a"]
 finally:
     del R.ACCOUNTS["a"]["private_to"]
-check("status shows the owner of a private account", acct["private_to"] == "dev-1")
+check("status lists the owners of a private account", acct["private_to"] == ["dev-1"])
+R.ACCOUNTS["a"]["private_to"] = ["dev-1", "dev-2"]
+try:
+    acct = call(path="/rotate/status", method="GET").json()["accounts"]["a"]
+finally:
+    del R.ACCOUNTS["a"]["private_to"]
+check("status lists every owner", acct["private_to"] == ["dev-1", "dev-2"])
 check("status auth via ?key=", call(path="/rotate/status?key=devkey-1", key=None,
                                     method="GET").status_code == 200)
 r = call(path="/rotate/stats", method="GET")

@@ -95,16 +95,18 @@ def test_account_cap_lookahead_must_parse():
         _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
 
 
-def test_account_private_to_must_name_a_registered_device():
-    devices = {"laptop": "dev-laptop-a1b2c3"}
-    for owner in ("ghost", "", None, 5, ["laptop"]):
+def test_account_private_to_must_name_registered_devices():
+    devices = {"laptop": "dev-laptop-a1b2c3", "desk": "dev-desk-d4e5f6"}
+    for owner in ("ghost", "", None, 5, [], ["laptop", "ghost"], ["laptop", "laptop"],
+                  ["laptop", 5], {"laptop": 1}):
         try:
             _load_with({"accounts": [dict(ACCT[0], private_to=owner)], "devices": devices})
             raise AssertionError(f"private_to {owner!r} must refuse startup")
         except SystemExit as error:
             assert "account 'a'" in str(error) and "private_to" in str(error), str(error)
-    cfg = _load_with({"accounts": [dict(ACCT[0], private_to="laptop")], "devices": devices})
-    assert cfg["accounts"][0]["private_to"] == "laptop"
+    for owner in ("laptop", ["laptop"], ["laptop", "desk"]):
+        cfg = _load_with({"accounts": [dict(ACCT[0], private_to=owner)], "devices": devices})
+        assert cfg["accounts"][0]["private_to"] == owner
 
 
 def _import_with(cfg: dict, code: str = "import rotator"):

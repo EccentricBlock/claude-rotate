@@ -67,11 +67,16 @@ def fresh_state(active="shared"):
 
 
 # --- 1. helpers -------------------------------------------------------------
-check("private_to reads owner", R.private_to("pam") == "pam-mac")
-check("private_to None when shared", R.private_to("shared") is None)
+check("owners reads the owner", R.owners("pam") == ["pam-mac"])
+check("owners is empty when shared", R.owners("shared") == [])
 check("shared available to any device", R.available_to("shared", "other-mac"))
 check("private available to its owner", R.available_to("pam", "pam-mac"))
 check("private NOT available to a stranger", not R.available_to("pam", "other-mac"))
+R.ACCOUNTS["pam"]["private_to"] = ["pam-mac", "pam-linux"]
+check("every device in a list owns the account", R.available_to("pam", "pam-mac")
+      and R.available_to("pam", "pam-linux"))
+check("a device outside the list does not", not R.available_to("pam", "other-mac"))
+R.ACCOUNTS["pam"]["private_to"] = "pam-mac"
 check("device=None means no scoping (tests / single-user)", R.available_to("pam", None))
 
 
