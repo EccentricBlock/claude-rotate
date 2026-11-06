@@ -110,8 +110,9 @@ the service active; otherwise it says `NOT live` and exits 2.
 | --- | --- |
 | Show service, accounts, devices, active account | `sudo claude-rotate-admin status` (`--json` for scripts) |
 | Add an account, or replace an existing account's token | `sudo claude-rotate-admin add-token NAME` |
+| Add an account reserved for one device, at priority 1 | `sudo claude-rotate-admin add-token NAME --private-to DEVICE` |
 | Add a device and print its two `export` lines | `sudo claude-rotate-admin add-user NAME` |
-| Revoke a device | `sudo claude-rotate-admin remove-user NAME` |
+| Revoke a device (refused while it owns a private account) | `sudo claude-rotate-admin remove-user NAME` |
 | Remove an account and delete its token file | `sudo claude-rotate-admin remove-token NAME` |
 | Set the URL printed for new devices | `sudo claude-rotate-admin set-url https://HOST` |
 | Switch to the next eligible account, or to ACCOUNT | `sudo claude-rotate-admin rotate [ACCOUNT]` |

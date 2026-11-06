@@ -346,7 +346,8 @@ rate-limit headers:
 - **Accounts** — live 5-hour and weekly meters (from Anthropic's own headers)
   with a tick at the switch threshold, reset countdowns, upstream status and
   the active account. Hover a reset countdown for the exact reset time in your
-  browser's time zone and in UTC.
+  browser's time zone and in UTC. A private account carries a "private to
+  <device>" badge.
 - **Weekly quota, all accounts** — the enabled accounts' current weekly
   usage, summed (blue), against their combined capacity (orange: 100% per
   account, scaled by `accounts[].weight`). Usage drops at each account's weekly
@@ -374,7 +375,7 @@ The 24 h figures come from the audit log. Longer periods come from
 minute. On first start it is rebuilt once from `audit.jsonl` and its rotated
 copies, so all time reaches back as far as those logs do.
 
-JSON endpoints: `/rotate/status` (accounts + switch events) and
+JSON endpoints: `/rotate/status` (accounts, each with its `private_to` owner or null, + switch events) and
 `/rotate/stats` (rollups, alerts and the longer `periods`), same `?key=` or `Authorization: Bearer`
 auth. Audit trail: `logs/audit.jsonl`, one JSON record per request.
 
@@ -404,6 +405,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `devices{}` | `name → device key`; key is what the device puts in `CLAUDE_CODE_OAUTH_TOKEN` |
 | `accounts[].priority` | lower = preferred; accounts form tiers, backup tiers only used when every preferred account is spent (default 100) |
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
+| `accounts[].private_to` | a device name: the account is served *only* to that device; every other device never touches it. `add-account --private-to` (`setup.sh` and `claude-rotate-admin`) also sets `priority` to 1. See "Preferring one account over another". |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
 | `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
 | `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
@@ -487,7 +489,7 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
 
 ### Preferring one account over another
 
-Three levels of control, from lazy to pro — all in the same `config.json`,
+Four levels of control, from lazy to pro — all in the same `config.json`,
 deliberately **no separate rules file** (see design note below):
 
 **Level 0 — do nothing.** The defaults (consume-first + thresholds + cooldown)
@@ -522,13 +524,35 @@ Combine with `strategy` for the remaining temperament choice: `consume-first`
 `most-weekly-left` (always ride the account with the most weekly quota left) or
 `weekly-pace` (spend the quota likeliest to expire, keeping a fresh session in reserve).
 
+**Level 3 — pin an account to a device.** `"private_to": "<device name>"` marks
+an account as belonging to one device: it is served *only* to that device. The
+owner competes for it like any other account, by `priority` (Level 1); every
+other device is never routed to it. `./setup.sh add-account --private-to` sets
+`priority` to 1, so the owner spends their own quota before the shared pool; a
+`private_to` written by hand keeps the default priority, so the owner's device
+chooses between it and the shared accounts by `strategy`. The device name must
+be a registered device in `devices{}`: startup fails otherwise. Each device
+keeps its own current account (`device_accounts` in `state.json`), so one
+device's switch never moves another's. Set it in `config.json`, or with the
+CLI:
+
+```sh
+./setup.sh add-account max-20x --private-to kamal-mbp
+sudo claude-rotate-admin add-token max-20x --private-to kamal-mbp   # Debian service
+```
+
+The admin CLI also refuses `remove-user` for a device that still owns a private
+account.
+
+This is what you reach for when someone joins with their own subscription and
+you don't want the rest of the pool quietly burning their weekly quota.
+
 **Design note — why no rules YAML:** a rules engine (per-model routes,
-time-of-day windows, per-device pinning) would add a parser, a second config
-file, and an ordering semantics to a one-file tool, and every use case we've
-actually hit decomposes into the four knobs above (strategy, priority,
-disabled, thresholds). If a real need appears that doesn't decompose — say
-per-device account pinning — add it as another plain field on the existing
-config objects, not as a DSL.
+time-of-day windows, and the like) would add a parser, a second config file,
+and an ordering semantics to a one-file tool, and every use case we've
+actually hit decomposes into the knobs above (strategy, priority, disabled,
+private_to, thresholds). If a real need appears that doesn't decompose, add it
+as another plain field on the existing config objects, not as a DSL.
 
 ## Run as a service
 
@@ -808,6 +832,7 @@ Based on clement-z `56ef19e`.
 - Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account also used in chat is not drained before the working week ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
 - Made the idle refresh's probe model configurable with `refresh_idle_model`, and documented the refresh's daily cost per idle account ([05f1c6e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/05f1c6e)).
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
+- Took private accounts from kamal/claude-rotate (authorship preserved, admin dashboard and join page left out): `accounts[].private_to` reserves an account for one device, `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token`, and a panel badge ([kamal 98c5520](https://github.com/kamal/claude-rotate/commit/98c5520), [kamal ca5d02b](https://github.com/kamal/claude-rotate/commit/ca5d02b)).
 
 ### clement-z/claude-rotate
 
