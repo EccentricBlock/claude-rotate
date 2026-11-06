@@ -1,0 +1,8 @@
+# Files restored into context after /compact, one path per line.
+# Paths are relative to the project root. Blank lines and # comments are ignored.
+# Don't list CLAUDE.md or its @imports: they reload on their own.
+# A file over 100 lines is not pasted; the session is told to re-read it.
+# A trailing word `tail` after the path marks a file whose recent part is its
+# end, such as a log.
+agents/shell-traps.md
+agents/git.md
