@@ -162,6 +162,74 @@ check("first-time stranger inherits the global active account",
       R.device_current("other-mac") == "shared")
 
 
+# --- 2c. a private account drains to its limits; several balance by strategy -
+# Owners use their private accounts up to the thresholds and the weekly cap before
+# moving on, and several private accounts for one device are ordered by `strategy`.
+for n, tok in (("pam2", "tok-pam2"), ("pam3", "tok-pam3")):
+    R.ACCOUNTS[n] = {"name": n, "token": tok, "private_to": "pam-mac", "priority": 1}
+R.ACCOUNTS["pam"]["priority"] = 1
+
+
+def roomy(**kw):
+    return dict({"util_5h": 0.1, "util_7d": 0.1, "reset_7d": now + 500000}, **kw)
+
+
+def pool(**per_account):
+    fresh_state()
+    R.STATE["accounts"] = {n: roomy(**per_account.get(n, {})) for n in R.ACCOUNTS}
+
+
+pool()
+check("a private account is used while it is under its limits",
+      R.pick_account("pam-mac") in ("pam", "pam2", "pam3"))
+pool(pam={"util_5h": 0.85}, pam2={"util_5h": 0.85}, pam3={"util_5h": 0.85})
+check("owner leaves private accounts only once every one is past the 5h threshold",
+      R.pick_account("pam-mac") == "shared")
+pool(pam={"util_7d": 0.99}, pam2={"util_5h": 0.9}, pam3={"util_5h": 0.2})
+check("a private account past a threshold is skipped for another private one",
+      R.pick_account("pam-mac") == "pam3")
+for n in ("pam", "pam2", "pam3"):
+    R.ACCOUNTS[n]["weekly_cap"] = 0.05
+pool(pam={"util_7d": 0.5}, pam2={"util_7d": 0.5}, pam3={"util_7d": 0.5})
+check("owner leaves private accounts that are over their weekly cap",
+      R.pick_account("pam-mac") == "shared")
+R.ACCOUNTS["pam2"].pop("weekly_cap")
+check("a private account under no cap is still used when the others are over theirs",
+      R.pick_account("pam-mac") == "pam2")
+for n in ("pam", "pam3"):
+    R.ACCOUNTS[n].pop("weekly_cap")
+
+# Several private accounts balance in line with the strategy.
+def picks(strategy, **per_account):
+    R.STRATEGY = strategy
+    pool(**per_account)
+    return R.pick_account("pam-mac")
+
+
+check("consume-first drains the private account whose week resets soonest",
+      picks("consume-first", pam={"reset_7d": now + 300000}, pam2={"reset_7d": now + 100000},
+            pam3={"reset_7d": now + 200000}) == "pam2")
+check("least-used picks the private account with the lowest 5h use",
+      picks("least-used", pam={"util_5h": 0.5}, pam2={"util_5h": 0.3}, pam3={"util_5h": 0.1}) == "pam3")
+check("most-weekly-left picks the private account with the lowest weekly use",
+      picks("most-weekly-left", pam={"util_7d": 0.6}, pam2={"util_7d": 0.1}, pam3={"util_7d": 0.4}) == "pam2")
+check("weekly-pace picks the private account whose weekly quota is likeliest to expire",
+      picks("weekly-pace", pam={"reset_7d": now + 400000}, pam2={"reset_7d": now + 50000},
+            pam3={"reset_7d": now + 300000}) == "pam2")
+R.STRATEGY = "consume-first"
+
+# Riding one private account when it reaches the threshold: the next private one, not shared.
+pool(pam={"util_5h": 0.85})
+R.STATE["device_accounts"]["pam-mac"] = "pam"
+v = asyncio.run(R.note_response("pam", headers(u5=0.85, u7=0.1), 200, device="pam-mac"))
+check("owner rotates to another private account before the shared pool",
+      v == "switched" and R.STATE["device_accounts"]["pam-mac"] in ("pam2", "pam3"))
+
+for n in ("pam2", "pam3"):
+    del R.ACCOUNTS[n]
+del R.ACCOUNTS["pam"]["priority"]
+
+
 # --- 3. note_response rotates a device within its own pool ------------------
 fresh_state()
 R.STATE["accounts"] = {
