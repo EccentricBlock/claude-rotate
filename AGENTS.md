@@ -72,19 +72,22 @@ fork is not swept to match, so later merges stay clean.
 
 ## Keeping the README current
 
-A functional change updates the README in the same commit. A fix without its
-README update is not finished.
+A change to documented behaviour updates the README in the same commit. Such a
+change without its README update is not finished.
 
-- A functional change is a new or changed config key, default, endpoint,
-  `/rotate/status` field, panel feature, CLI or install step, or rotation
-  behaviour.
+- Update the README when a change alters what it states or should state: a
+  new or changed config key or default, endpoint, `/rotate/status` field,
+  panel feature, CLI or install step, or rotation policy.
+- Do not update it for a fix that makes the code match what the README
+  already says, or for internal fixes, refactors, tests and docs.
 - Put a config key in the "Configuration" table, with a default that matches
   the code. Put behaviour in the section that describes it, such as "Rotation
   policy", "Analytics panel", "OpenAI-compatible endpoint" or
   "Troubleshooting".
 - Add a one-line bullet under "Fork changes", "mrglrlgrlgrl/claude-rotate",
-  that links the commit or PR. Docs-only, test-only and refactor commits get
-  no bullet.
+  for a feature, a behaviour change, a merged PR or a fix for a reported
+  issue. Link the commit, PR or issue. Other small fixes, docs, tests and
+  refactors get no bullet.
 - A change to running or securing the service updates `OPERATIONS.md`,
   `SECURITY.md` or `deploy/README.md` too, or instead.
 - New README prose follows the documentation style. Text around it is not
@@ -96,8 +99,9 @@ Commit and push without asking for low-impact changes. Each commit stays
 small and coherent.
 
 - **No need to ask.** Docs, tests, comments, config examples, and small fixes
-  that tests cover, with their README update. A clean push (no force, no
-  rewritten history) never needs asking.
+  that tests cover. A fix that changes documented behaviour is not small: it
+  takes the tier for its area below. A clean push (no force, no rewritten
+  history) never needs asking.
 - **Commit once the plan is approved; push when the tests pass.** Anything that
   changes rotation, auth, quota or proxy behaviour.
 - **Always ask first.**
@@ -161,7 +165,8 @@ lists the files the post-compact hook pastes back, one path per line. Read
 
 Read a file when its trigger applies.
 
-- Before committing a functional change: "Keeping the README current" above.
+- Before committing a change to documented behaviour: "Keeping the README
+  current" above.
 - Before committing or pushing: `agents/git.md`.
 - Before writing prose in `AGENTS.md` or `agents/`:
   `agents/documentation-style.md`.
