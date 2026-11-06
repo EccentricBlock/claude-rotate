@@ -614,8 +614,7 @@ For routine Debian service management, see the [operations quick guide](OPERATIO
 
 The repository's `Dockerfile` builds a small image (Python 3.12, non-root user,
 dependencies from `requirements.lock`); every push to `main` publishes it to
-`ghcr.io/mrglrlgrlgrl/claude-rotate` for amd64 and arm64. A package GitHub
-creates is private until its owner makes it public in the package settings.
+`ghcr.io/mrglrlgrlgrl/claude-rotate` for amd64 and arm64.
 [`deploy/compose.yaml`](deploy/compose.yaml) is a ready example:
 
 ```sh
