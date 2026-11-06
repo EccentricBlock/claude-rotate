@@ -47,6 +47,8 @@ CURRENT = OPT / "current"
 RELEASES = OPT / "releases"
 UNIT = P("/etc/systemd/system/claude-rotate.service")
 UNIT_NAME = "claude-rotate.service"
+# How long to wait for a reloading service to report that it accepted (or rejected) the config.
+RELOAD_WAIT_S = 5
 # One lock serializes install.sh, uninstall.sh and every admin command.
 LOCK = P("/run/claude-rotate.lock")
 SERVICE_USER = "claude-rotate"
@@ -440,7 +442,8 @@ def activate(cfg: dict, *, restart: bool = True, what: str = "change") -> int:
     for warning in warnings:
         out(f"warning: {warning}")
     if not restart:
-        out(f"{what} stored; NOT live until: sudo systemctl restart {UNIT_NAME}")
+        out(f"{what} stored; the running service loads it within its reload_poll_s (5 s by default), "
+            f"or now with: sudo systemctl reload {UNIT_NAME}")
         return EXIT_OK
     if not systemctl_available() or not unit_installed():
         out(f"{what} stored; the systemd unit is not installed, so nothing is live. Run install.sh.")
@@ -457,17 +460,47 @@ def activate(cfg: dict, *, restart: bool = True, what: str = "change") -> int:
             out(f"  - {problem}")
         return EXIT_SETUP_NEEDED
     if is_active():
-        result = systemctl("restart", UNIT_NAME)
-        verb = "restarted"
-    else:
-        result = systemctl("enable", "--now", UNIT_NAME)
-        verb = "enabled and started"
+        return reload_service(cfg, what)
+    result = systemctl("enable", "--now", UNIT_NAME)
     if result.returncode != 0 or not is_active():
         detail = (result.stderr or result.stdout).strip()
-        out(f"{what} stored but NOT live: service {verb.split()[0]} FAILED"
+        out(f"{what} stored but NOT live: service enabled FAILED"
             + (f": {detail}" if detail else "") + f"; {journal_hint()}")
         return EXIT_NOT_LIVE
-    out(f"service {verb}: {what} is live")
+    out(f"service enabled and started: {what} is live")
+    return EXIT_OK
+
+
+def reload_service(cfg: dict, what: str) -> int:
+    """Tell the running service to reload, then ask it whether it accepted the
+    new configuration: a reload keeps the old one when the new one is invalid,
+    and systemd cannot see that."""
+    started = time.time()
+    result = systemctl("reload", UNIT_NAME)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        out(f"{what} stored but NOT live: service reload FAILED"
+            + (f": {detail}" if detail else "")
+            + f"; a unit installed before reloads existed needs install.sh run again; {journal_hint()}")
+        return EXIT_NOT_LIVE
+    problem = "no answer"
+    while True:
+        live, problem = live_status(cfg)
+        reload_state = (live or {}).get("config") or {}
+        if (reload_state.get("last_reload") or 0) >= started:
+            break
+        if time.time() >= started + RELOAD_WAIT_S:
+            out(f"{what} stored; reload sent but not confirmed ({problem or 'no reload reported'}); "
+                f"{journal_hint()}")
+            return EXIT_NOT_LIVE
+        time.sleep(0.25)
+    if reload_state.get("error"):
+        out(f"{what} stored but NOT live: the service kept its previous configuration: "
+            f"{reload_state['error']}")
+        return EXIT_NOT_LIVE
+    out(f"service reloaded: {what} is live")
+    if reload_state.get("restart_needed"):
+        out("  a restart is needed to apply: " + ", ".join(reload_state["restart_needed"]))
     return EXIT_OK
 
 
@@ -899,6 +932,7 @@ def collect_status():
         if live is not None:
             report["live"] = {"active_account": live.get("active_account"),
                               "storage_errors": live.get("storage_errors"),
+                              "config": live.get("config"),
                               "accounts": {n: {k: a.get(k) for k in ("effective_util_5h", "effective_util_7d",
                                                                     "last_seen", "status")}
                                            for n, a in (live.get("accounts") or {}).items()}}
@@ -963,6 +997,14 @@ def cmd_status(args) -> int:
     if live:
         errors = live.get("storage_errors") or {}
         out("live /rotate/status: reachable; storage_errors: " + (json.dumps(errors) if errors else "none"))
+        loaded = live.get("config")
+        if loaded:
+            line = f"live config: loaded {fmt_time(loaded.get('loaded_at'))}"
+            if loaded.get("error"):
+                line += f"; LAST RELOAD FAILED, previous config kept: {loaded['error']}"
+            if loaded.get("restart_needed"):
+                line += "; restart needed for: " + ", ".join(loaded["restart_needed"])
+            out(line)
     elif report.get("live_error"):
         out(f"live /rotate/status: unavailable ({report['live_error']})")
     events = report.get("recent_events") or []
@@ -1003,7 +1045,7 @@ def build_parser():
     p.add_argument("--token-file", help="read the token from this file instead of the prompt/stdin")
     p.add_argument("--private-to", metavar="DEVICE[,DEVICE...]", type=lambda v: v.split(","),
                    help="reserve the account for these registered devices; they use it first")
-    p.add_argument("--no-restart", action="store_true", help="store only; do not touch the service")
+    p.add_argument("--no-restart", action="store_true", help="store only; do not signal the service (it still polls for changes)")
     p = add("add-user", cmd_add_user, "mint a device key and print the client settings", aliases=("add-device",))
     p.add_argument("name", metavar="NAME")
     p.add_argument("--no-restart", action="store_true")
@@ -1016,7 +1058,7 @@ def build_parser():
     add("set-url", cmd_set_url, "set public_url used in the add-user instructions").add_argument("url", metavar="URL")
     add("rotate", cmd_rotate, "make another account active (next eligible, or ACCOUNT); restarts the service").add_argument(
         "account", nargs="?", metavar="ACCOUNT")
-    add("activate", cmd_activate, "enable/restart the service if the configuration is complete, else stop and disable it")
+    add("activate", cmd_activate, "enable the service, or reload it if running, when the configuration is complete; else stop and disable it")
     add("check", cmd_check, "exit 0 if the configuration is complete, 3 if setup is needed, 1 if invalid")
     add("init", cmd_init, "create or adopt /etc/claude-rotate (run by install.sh)")
     return parser

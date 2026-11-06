@@ -4,6 +4,9 @@
 <!-- macOS launchd agent. Install:
        cp deploy/com.example.claude-rotate.plist ~/Library/LaunchAgents/
        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.claude-rotate.plist
+     Reload config.json and the token files without a restart (the proxy also polls
+     them every reload_poll_s seconds):
+       launchctl kill SIGHUP gui/$(id -u)/com.example.claude-rotate
      Gotchas (learned the hard way):
        * Pin the FULL python3 path (launchd's PATH resolves python3 to an ancient
          Xcode build that can't parse modern syntax).

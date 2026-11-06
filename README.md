@@ -616,13 +616,13 @@ rejecting the *device* (the error body names claude-rotate, so it's not
 Anthropic). The device's `CLAUDE_CODE_OAUTH_TOKEN` doesn't match any entry in
 `config.json` `devices{}` — re-check the key, or re-run
 `./setup.sh add-device` (standalone) / `sudo claude-rotate-admin add-user`
-(Debian service) and restart.
+(Debian service); the proxy loads the new key without a restart.
 
 **Client gets a 401 whose error body comes from Anthropic.** The *account
 token* the proxy swapped in was rejected upstream — on a previously working
 account this almost always means the setup token died (revoked, or hit its
 ~1-year expiry). Re-mint with `claude setup-token`, then replace
-`tokens/<name>.token` and restart, or on the Debian service run
+`tokens/<name>.token` (the proxy loads it within `reload_poll_s` seconds), or on the Debian service run
 `sudo claude-rotate-admin add-token <name>` for the existing account.
 
 **A request seems to hang.** If every account is spent and `hold_max_s` is
@@ -645,8 +645,8 @@ configuration is still running, and `restart_needed` lists the settings that
 only a restart applies (see [Reloading the
 configuration](#reloading-the-configuration)). To restart:
 `launchctl kickstart -k gui/$(id -u)/<label>` (macOS) or
-`sudo claude-rotate-admin activate` (Debian service; validates the config, then
-restarts).
+`sudo systemctl restart claude-rotate` (Debian service). `sudo
+claude-rotate-admin activate` validates the config and reloads without one.
 
 **Does the VS Code extension work?** Yes — it honours the same
 `ANTHROPIC_BASE_URL` / `CLAUDE_CODE_OAUTH_TOKEN` environment variables. Launch

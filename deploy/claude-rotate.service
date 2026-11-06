@@ -12,6 +12,8 @@ User=claude-rotate
 Group=claude-rotate
 WorkingDirectory=/opt/claude-rotate/current
 ExecStart=/opt/claude-rotate/current/.venv/bin/python /opt/claude-rotate/current/deploy/systemd_runner.py
+# SIGHUP reloads config.json and the token files without dropping open streams.
+ExecReload=/bin/kill -HUP $MAINPID
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 Environment=CLAUDE_ROTATE_CONFIG=/etc/claude-rotate/config.json

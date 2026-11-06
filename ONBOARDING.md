@@ -34,15 +34,18 @@ On the Debian service (installed with `install.sh`), from any directory:
 sudo claude-rotate-admin add-user maria-laptop
 ```
 
-This mints the key `maria-laptop`, restarts the service so it is live, and
+This mints the key `maria-laptop`, reloads the service so it is live, and
 prints the two `export` lines plus the dashboard link for the requester (the
 URL comes from `public_url`; set it once with
 `sudo claude-rotate-admin set-url https://YOUR-TAILSCALE-HOST`). The command
-prints `is live` only after systemd reports the service active. Paste the block
+prints `is live` only after the service confirms it accepted the new
+configuration. Paste the block
 back over a reasonably private channel — the key is a bearer credential.
 
-**Revoke**: `sudo claude-rotate-admin remove-user maria-laptop`. It restarts the
-service, so revocation is immediate and affects only that device. The panel's
+**Revoke**: `sudo claude-rotate-admin remove-user maria-laptop`. It reloads the
+service, so new requests with that key are refused at once and only that device
+is affected; a stream the device already has open finishes (restart the service
+to cut it off). The panel's
 device roster shows every key (suffix only) with last-seen times, so stale
 devices are easy to spot. `sudo claude-rotate-admin status` lists them too.
 

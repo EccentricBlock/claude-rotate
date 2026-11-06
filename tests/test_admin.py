@@ -38,6 +38,9 @@ case "$1" in
     if [ -e "$d/fail-start" ]; then echo inactive > "$d/active"; echo "Job for claude-rotate.service failed." >&2; exit 1; fi
     [ "$1" = enable ] && echo enabled > "$d/enabled"
     echo active > "$d/active" ;;
+  reload)
+    [ "$(state)" = active ] || { echo "Unit claude-rotate.service is not active." >&2; exit 1; }
+    if [ -e "$d/fail-reload" ]; then echo "Job type reload is not applicable for unit claude-rotate.service." >&2; exit 1; fi ;;
   stop)
     [ -e "$d/fail-stop" ] && exit 1
     [ -x "$d/on-stop" ] && "$d/on-stop"
@@ -90,6 +93,50 @@ class Fixture:
 
     def cleanup(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+class FakeService:
+    """Stands in for the running proxy's /rotate/status, with the config reload state a
+    reloaded service reports. `error` is what a rejected reload would say."""
+
+    def __init__(self, f, error=None, restart_needed=()):
+        outer = self
+        self.f, self.error, self.restart_needed, self.hits = f, error, list(restart_needed), 0
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                outer.hits += 1
+                now = time.time()
+                body = json.dumps({"active_account": "a", "accounts": {}, "config": {
+                    "loaded_at": now, "last_reload": now, "error": outer.error,
+                    "restart_needed": outer.restart_needed}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        cfg = f.cfg()
+        self.old_port = cfg.get("port")
+        cfg["port"] = self.server.server_address[1]
+        f.config.write_text(json.dumps(cfg))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.server.shutdown()
+        self.server.server_close()
+        cfg = self.f.cfg()
+        if self.old_port is None:
+            cfg.pop("port", None)
+        else:
+            cfg["port"] = self.old_port
+        self.f.config.write_text(json.dumps(cfg))
 
 
 def mode(path):
@@ -185,12 +232,15 @@ def test_add_user_activation_and_duplicates(f):
     r = f.run("add-user", "alice-laptop")
     assert r.returncode == 1 and f.config.read_bytes() == before, r
     assert "already exists" in r.stderr and f.calls() == []
-    # Active service: a second device restarts and is live; alias accepted.
+    # Active service: a second device is reloaded, not restarted, and live once the
+    # service confirms it; alias accepted.
     f.set_active(True)
     f.reset_calls()
-    r = f.run("add-device", "bob-desktop")
-    assert r.returncode == 0 and "restarted" in r.stdout and "is live" in r.stdout, r
-    assert any(c.startswith("restart") for c in f.calls())
+    with FakeService(f) as service:
+        r = f.run("add-device", "bob-desktop")
+    assert r.returncode == 0 and "reloaded" in r.stdout and "is live" in r.stdout, r
+    assert "reload claude-rotate.service" in f.calls() and not any(c.startswith("restart") for c in f.calls())
+    assert service.hits >= 1
     assert set(f.cfg()["devices"]) == {"alice-laptop", "bob-desktop"}
     assert f.cfg()["devices"]["alice-laptop"] == key
 
@@ -278,9 +328,10 @@ def test_inherited_lock_descriptor(f):
 
 
 def test_restart_failure_is_reported(f):
+    # An inactive service is started; a failed start is not live.
     (f.fake / "fail-start").write_text("")
     try:
-        f.set_active(True)
+        f.set_active(False)
         r = f.run("add-user", "carol-phone")
         assert r.returncode == 2, r
         assert "NOT live" in r.stdout and "FAILED" in r.stdout and "journalctl" in r.stdout
@@ -288,8 +339,21 @@ def test_restart_failure_is_reported(f):
         assert "carol-phone" in f.cfg()["devices"]  # stored, honestly reported as not live
     finally:
         (f.fake / "fail-start").unlink()
-    r = f.run("remove-user", "carol-phone", "--no-restart")
-    assert r.returncode == 0 and "NOT live until" in r.stdout
+    # A running service is reloaded; a failed reload is not live either.
+    f.set_active(True)
+    (f.fake / "fail-reload").write_text("")
+    try:
+        r = f.run("remove-user", "carol-phone")
+        assert r.returncode == 2, r
+        assert "NOT live" in r.stdout and "reload FAILED" in r.stdout and "install.sh" in r.stdout
+        assert "is live" not in r.stdout
+        assert "carol-phone" not in f.cfg()["devices"]
+    finally:
+        (f.fake / "fail-reload").unlink()
+    r = f.run("add-user", "erin-watch", "--no-restart")
+    assert r.returncode == 0 and "reload_poll_s" in r.stdout and "systemctl reload" in r.stdout, r
+    assert "restart" not in r.stdout
+    assert f.run("remove-user", "erin-watch", "--no-restart").returncode == 0
     # A missing unit cannot be live either.
     unit = f.prefix / "etc/systemd/system/claude-rotate.service"
     unit.rename(unit.with_suffix(".bak"))
@@ -370,6 +434,34 @@ def test_status_live_query_uses_header(f):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_reload_is_confirmed_through_status(f):
+    assert "ExecReload=/bin/kill -HUP $MAINPID" in UNIT_TEXT
+    f.set_active(True)
+    # The service rejected the new file and kept the old config: stored, not live.
+    f.reset_calls()
+    with FakeService(f, error="placeholder device key(s) in config.json"):
+        r = f.run("add-user", "frank-pc")
+        assert r.returncode == 2, r
+        assert "NOT live" in r.stdout and "kept its previous configuration" in r.stdout
+        assert "placeholder device key" in r.stdout and "is live" not in r.stdout
+        assert "frank-pc" in f.cfg()["devices"]
+        human = f.run("status")
+        assert "LAST RELOAD FAILED" in human.stdout and "placeholder device key" in human.stdout
+        live = json.loads(f.run("status", "--json").stdout)["live"]
+        assert live["config"]["error"] == "placeholder device key(s) in config.json"
+    assert "reload claude-rotate.service" in f.calls() and not any(c.startswith("restart") for c in f.calls())
+    # Accepted, with a setting that only a restart applies.
+    with FakeService(f, restart_needed=["port"]):
+        r = f.run("remove-user", "frank-pc")
+        assert r.returncode == 0 and "is live" in r.stdout, r
+        assert "restart is needed to apply: port" in r.stdout
+        assert "frank-pc" not in f.cfg()["devices"]
+    # A service that never answers cannot confirm; say so rather than claim it is live.
+    r = f.run("add-user", "gina-tv")
+    assert r.returncode == 2 and "not confirmed" in r.stdout and "is live" not in r.stdout, r
+    assert f.run("remove-user", "gina-tv", "--no-restart").returncode == 0
 
 
 def write_state(f, state):
@@ -541,6 +633,7 @@ def main():
              "test_private_to_flag_and_device_removal_guard", "test_readiness_needs_enabled_nonempty_token", "test_inherited_lock_descriptor",
              "test_restart_failure_is_reported", "test_concurrent_add_users_are_serialized",
              "test_status_has_no_secrets", "test_status_live_query_uses_header",
+             "test_reload_is_confirmed_through_status",
              "test_rotate_rejections_do_not_mutate", "test_rotate_switches_after_stop_and_preserves_state",
              "test_remove_token_and_setup_needed", "test_set_url_and_symlinked_config"]
     tests = [(n, globals()[n]) for n in order]  # the fixture is built up step by step

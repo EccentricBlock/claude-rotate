@@ -45,6 +45,7 @@ in full.
 | Status | `sudo systemctl status claude-rotate --no-pager` |
 | Follow logs (Ctrl-C exits the viewer) | `sudo journalctl -u claude-rotate -f` |
 | Last 100 log lines | `sudo journalctl -u claude-rotate -n 100 --no-pager` |
+| Reload config.json and the token files (open streams carry on) | `sudo systemctl reload claude-rotate` |
 | Restart | `sudo systemctl restart claude-rotate` |
 | Stop | `sudo systemctl stop claude-rotate` |
 | Start | `sudo systemctl start claude-rotate` |
@@ -102,9 +103,12 @@ For a consistent backup of mutable state/logs, stop the service before copying.
 
 `claude-rotate-admin` works from any directory and needs root. It validates the
 configuration, writes files atomically with the modes above, holds a lock so
-concurrent commands cannot lose each other's changes, and then restarts the
-service so the change is live. It prints `is live` only after systemd reports
-the service active; otherwise it says `NOT live` and exits 2.
+concurrent commands cannot lose each other's changes, and then reloads the
+running service so the change is live without dropping open streams (a stopped
+service is enabled and started instead). After a reload it asks the service
+whether it accepted the new configuration, and prints `is live` only if it did.
+If the service kept its previous configuration because the new one did not
+validate, or does not answer, it says `NOT live` and exits 2.
 
 | Action | Command |
 | --- | --- |
@@ -116,7 +120,7 @@ the service active; otherwise it says `NOT live` and exits 2.
 | Remove an account and delete its token file | `sudo claude-rotate-admin remove-token NAME` |
 | Set the URL printed for new devices | `sudo claude-rotate-admin set-url https://HOST` |
 | Switch to the next eligible account, or to ACCOUNT | `sudo claude-rotate-admin rotate [ACCOUNT]` |
-| Validate config.json after a manual edit and restart | `sudo claude-rotate-admin activate` |
+| Validate config.json after a manual edit and reload | `sudo claude-rotate-admin activate` |
 
 `add-account`, `add-device`, `remove-account` and `remove-device` are aliases.
 Names are 1-64 ASCII letters, digits, `_` or `-`, starting with a letter or
@@ -124,13 +128,23 @@ digit. `add-token` asks for the token with a hidden prompt; in a script, pipe it
 on stdin or pass `--token-file PATH`. Tokens never appear on the command line or
 in the output. Adding a device whose name exists is refused; use `remove-user`
 then `add-user` to issue a new key. `--no-restart` stores a change without
-touching the service.
+signalling the service; the service still notices the changed files itself
+within `reload_poll_s` seconds (5 by default).
 
 Manual edits remain possible with `sudoedit /etc/claude-rotate/config.json`
 followed by `sudo claude-rotate-admin activate`, which checks the JSON and the
-readiness rules before restarting. Supported manual settings include
+readiness rules before reloading. Supported manual settings include
 `"disabled": true` and `"priority"` on an account and the rotation policy keys.
-Config and token changes always require a restart; there is no hot reload.
+
+The service reloads `config.json` and the token files without a restart; the
+[README](README.md#reloading-the-configuration) lists what a reload covers. An
+invalid file is rejected and the previous configuration keeps running, so
+`sudo claude-rotate-admin status` shows `live config: ... LAST RELOAD FAILED`
+until it is fixed. Only `bind`, `port`, `reload_poll_s` and the resource and
+audit limits (set by the unit's environment on this service) need a restart,
+and `status` lists any that changed. A device revoked by a reload loses new
+requests at once, but a stream it already has open finishes; restart the
+service to cut it off.
 
 ## Switching the upstream account
 
@@ -180,7 +194,8 @@ view the dashboard; there is no separate administrator role. JSON endpoints
 which avoids putting the key in a URL.
 
 To open the dashboard without a key from any tailnet user's device, set
-`"panel_tailnet": true` in the config and restart the service; then
+`"panel_tailnet": true` in the config and reload the service
+(`sudo claude-rotate-admin activate`); then
 `https://YOUR-TAILSCALE-HOST/rotate/panel` works on its own. It relies on the
 `Tailscale-User-Login` header that Serve adds, so tagged devices and Funnel
 traffic still need a key, and the service refuses to start with it unless

@@ -104,14 +104,14 @@ release path; moving a venv later can break executable shebangs.
 
 Credentials are created in place with `claude-rotate-admin`, which writes
 `/etc/claude-rotate/config.json` and `tokens/NAME.token` with the ownership and
-modes above and restarts the service. Do not run `setup.sh` inside
+modes above and reloads the service. Do not run `setup.sh` inside
 `/etc/claude-rotate`: its `0600`/`0700` modes make the files unreadable to the
 service account. Relative token paths such as `tokens/acct-1.token` resolve
 against `/etc/claude-rotate`, the directory of the selected config, not the code
 directory. Keep a protected backup of `/etc/claude-rotate`. Neither secrets nor
 state belong in the release tree or source control. Renew an expired or revoked
 token with `claude-rotate-admin add-token NAME` for the existing account; it
-replaces the token file and restarts the service.
+replaces the token file and reloads the service.
 
 ## Runtime and operations
 
@@ -302,8 +302,9 @@ following by hand, planning a short outage:
 new release and venv at a new final path, records resolved dependency versions
 in `installed-requirements.txt`, switches `current` atomically and restarts the
 service. Never `git pull` or `pip install` into the active release. Update
-config separately with the admin command; restart is required for
-configuration/token changes.
+config separately with the admin command, which reloads the service; an
+upgrade that changes the unit file (such as the `ExecReload` line the reload
+needs) must be installed with `install.sh` first.
 
 For a manual promotion or a rollback to a kept release, as root, stop the
 service, then replace the root-owned `current` symlink atomically on the same
