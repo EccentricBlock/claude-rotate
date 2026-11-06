@@ -1,9 +1,9 @@
 """Offline tests for private accounts.
 
-A private account carries `private_to: <device>` and is only ever served to that
-device — no one else's requests may be routed to it. The owner still rides the
-shared pool first (their private account is their reserve), and rotates onto it
-when the shared pool is spent.
+A private account carries `private_to: <device>` (or a list of devices) and is
+only ever served to those devices — no one else's requests may be routed to it.
+Its owners use it before any shared account, whatever the shared priorities, and
+rotate onto the shared pool only once it is spent.
 
   python3 tests/test_private.py
 """
@@ -102,6 +102,46 @@ R.STATE["accounts"] = {
 }
 check("stranger stays on a spent shared account rather than leak a private one",
       R.pick_account("other-mac") == "shared")
+
+
+# --- 2b. owners use their private account before the shared pool ----------
+fresh_state()
+R.ACCOUNTS["shared"]["priority"] = 1  # a better priority than pam's default 100
+R.STATE["accounts"] = {
+    "shared": {"util_5h": 0.1, "util_7d": 0.1, "reset_7d": now + 100000},
+    "pam":    {"util_5h": 0.5, "util_7d": 0.5, "reset_7d": now + 900000},
+    "dave":   {"util_5h": 0.1, "util_7d": 0.1, "reset_7d": now + 100000},
+}
+check("owner prefers its private account over a better-priority shared one",
+      R.pick_account("pam-mac") == "pam")
+check("a stranger still takes the shared account", R.pick_account("other-mac") == "shared")
+check("device-less ranking is still by priority", R.pick_account(None) == "shared")
+R.STATE["accounts"]["pam"]["util_5h"] = 0.9  # over the 0.8 threshold
+check("owner moves to the shared pool once its private account is spent",
+      R.pick_account("pam-mac") == "shared")
+
+# Riding shared while the private account has room again: pulled back after the cooldown.
+fresh_state()
+R.STATE["accounts"] = {
+    "shared": {"util_5h": 0.2, "util_7d": 0.2, "reset_7d": now + 100000},
+    "pam":    {"util_5h": 0.1, "util_7d": 0.1, "reset_7d": now + 900000},
+}
+R.STATE["device_accounts"]["pam-mac"] = "shared"
+asyncio.run(R.note_response("shared", headers(u5=0.2, u7=0.2), 200, device="pam-mac"))
+check("owner returns to its private account when it has room",
+      R.STATE["device_accounts"]["pam-mac"] == "pam"
+      and R.STATE["events"][-1]["reason"] == "priority_recovery")
+del R.ACCOUNTS["shared"]["priority"]
+
+# A first-time device that owns an account starts on it, not on the global active one.
+fresh_state(active="shared")
+R.STATE["accounts"] = {
+    "shared": {"util_5h": 0.2, "util_7d": 0.2, "reset_7d": now + 100000},
+    "pam":    {"util_5h": 0.2, "util_7d": 0.2, "reset_7d": now + 900000},
+}
+check("first-time owner starts on its private account", R.device_current("pam-mac") == "pam")
+check("first-time stranger inherits the global active account",
+      R.device_current("other-mac") == "shared")
 
 
 # --- 3. note_response rotates a device within its own pool ------------------

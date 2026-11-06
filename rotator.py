@@ -455,6 +455,13 @@ def usable(name: str) -> bool:
     return under_threshold(name) or reserve_spendable(name)
 
 
+def rank(name: str, device: str | None) -> tuple[int, int]:
+    """Sort key for preference: accounts reserved for this device come before
+    every shared account, and `priority` orders accounts within each group.
+    With no device, only priority counts."""
+    return (0 if device and device in owners(name) else 1, priority(name))
+
+
 def owners(name: str) -> list[str]:
     """Device names this account is reserved for; empty if every device may use it."""
     value = ACCOUNTS[name].get("private_to") or []
@@ -475,14 +482,16 @@ def device_current(device: str | None) -> str | None:
     while every other device keeps rotating through the shared pool. A device
     with no pointer yet inherits the global active account if it may use it,
     otherwise it takes its own best pick, so it never starts on someone else's
-    private account."""
+    private account. A device that owns an account always takes its own pick,
+    so it starts on that account rather than the global one."""
     if not device:
         return STATE.get("active_account")
     pointed = STATE.get("device_accounts", {}).get(device)
     if pointed:
         return pointed
     active = STATE.get("active_account")
-    if active in ACCOUNTS and available_to(active, device):
+    if (active in ACCOUNTS and available_to(active, device)
+            and not any(device in owners(n) for n in ACCOUNTS)):
         return active
     return pick_account(device)
 
@@ -535,8 +544,9 @@ def pick_account(device: str | None = None) -> str | None:
     reset counts as 0), and available to this device: a private account is only
     a candidate for the device it is reserved for, in every tier below, so a
     device with nothing else left gets None rather than another's private
-    account. Priority tiers come first: a lower `priority` account
-    always beats a higher one, and the strategy orders accounts *within* a tier.
+    account. Tiers come first: an account reserved for this device beats every
+    shared one, then a lower `priority` beats a higher one (see rank()), and the
+    strategy orders accounts *within* a tier.
 
     consume-first (default): burn the usable account whose weekly window resets
     soonest — weekly quota is use-it-or-lose-it, so spend the perishable one.
@@ -568,17 +578,17 @@ def pick_account(device: str | None = None) -> str | None:
             key = lambda n: (utilization(n),)
         return min(under, key=lambda n: (
             on_probation(n),  # a known-refusing account only as a last resort
-            priority(n),
+            rank(n, device),
             (0, binding_reset(n)) if reserve_spendable(n) else (1, 0),
             key(n)))
     reserve = [n for n in mine if hard_ok(n)]
     if reserve:
-        return min(reserve, key=lambda n: (on_probation(n), priority(n), binding_reset(n)))
+        return min(reserve, key=lambda n: (on_probation(n), rank(n, device), binding_reset(n)))
     pool = ([n for n in mine if not disabled(n) and not account_bad(n)]
             or [n for n in mine if not disabled(n)])
     if not pool:
         return None
-    return min(pool, key=lambda n: (not cap_ok(n), relief_ts(n), priority(n)))
+    return min(pool, key=lambda n: (not cap_ok(n), relief_ts(n), rank(n, device)))
 
 
 def record_switch(frm: str, to: str, reason: str, now: float,
@@ -687,14 +697,14 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
                     # reserve (emergency), stay put: the active account keeps
                     # its warm cache until it is actually rejected.
                     if (util_7d(account) >= THRESHOLD_7D
-                            or priority(nxt) < priority(account)
+                            or rank(nxt, device) < rank(account, device)
                             or reserve_spendable(nxt)
                             or utilization(nxt) <= utilization(account) - SWITCH_MARGIN):
                         reason = f"utilization>={THRESHOLD}"
                 elif cooled and usable(nxt) and not over and not on_probation(nxt):
                     # Voluntary moves never land on an account that last refused
                     # outright — it gets re-probed only when traffic is forced.
-                    if priority(nxt) < priority(account):
+                    if rank(nxt, device) < rank(account, device):
                         # A preferred account has room again — pull traffic back.
                         reason = "priority_recovery"
                     elif reserve_spendable(nxt) and not reserve_spendable(account):
@@ -1567,7 +1577,7 @@ def pick_working(device: str | None = None) -> str | None:
     ok = [n for n in ACCOUNTS if hard_ok(n) and available_to(n, device)]
     if not ok:
         return None
-    return min(ok, key=lambda n: (on_probation(n), priority(n), binding_reset(n)))
+    return min(ok, key=lambda n: (on_probation(n), rank(n, device), binding_reset(n)))
 
 
 async def revert_refusals(refused: dict, start: str, status: int,
@@ -1622,6 +1632,8 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
             account = pick_account(device)
             if account is None:
                 raise HTTPException(status_code=503, detail="no enabled accounts")
+        if device and device not in STATE.get("device_accounts", {}) or account != device_current(device):
+            # Record a first-time device's pick so every later check agrees with it.
             set_device_current(device, account)
             save_state()
         # Never fire a request at an account we already know is a closed/free
