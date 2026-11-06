@@ -204,10 +204,13 @@ def settings(cfg: dict) -> dict:
     """Validate a loaded config and return the module globals derived from it.
     Pure: it raises ConfigError or returns everything, so a caller can apply the
     whole set in one step."""
+    # CLAUDE_ROTATE_BIND wins over config.json: a container must listen on
+    # 0.0.0.0 whatever the mounted config says.
+    bind = os.environ.get("CLAUDE_ROTATE_BIND") or cfg.get("bind", "127.0.0.1")
     panel_tailnet = cfg.get("panel_tailnet", False)
     if type(panel_tailnet) is not bool:
         raise ConfigError("panel_tailnet must be true or false")
-    if panel_tailnet and cfg.get("bind", "127.0.0.1") not in LOOPBACK:
+    if panel_tailnet and bind not in LOOPBACK:
         raise ConfigError("panel_tailnet needs bind 127.0.0.1 behind Tailscale Serve: on any other "
                           "address a client could send Tailscale-User-Login itself and skip the key")
     cap_lookahead = duration_s(cfg.get("cap_lookahead", "12h"))
@@ -218,6 +221,8 @@ def settings(cfg: dict) -> dict:
         raise ConfigError("refresh_idle_model must be a nonempty model name string")
     return {
         "CFG": cfg,
+        "BIND": bind,
+        "PORT": cfg.get("port", 8484),
         "DEVICE_BY_KEY": {v: k for k, v in cfg["devices"].items()},
         "ACCOUNTS": {a["name"]: a for a in cfg["accounts"]},
         "MAX_REQUEST_BYTES": resource_limit(cfg, "max_request_bytes", 32 * 1024 * 1024),
@@ -1912,5 +1917,4 @@ async def proxy(request: Request, path: str):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=CFG.get("bind", "127.0.0.1"), port=CFG.get("port", 8484),
-                log_level="warning")
+    uvicorn.run(app, host=BIND, port=PORT, log_level="warning")

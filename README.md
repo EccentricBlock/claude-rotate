@@ -410,6 +410,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
 | `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
 | `accounts[].cap_lookahead` | overrides `cap_lookahead` for this account (default: the top-level value) |
+| `bind` / `port` | address and port the proxy listens on (defaults `"127.0.0.1"` / 8484). The environment variable `CLAUDE_ROTATE_BIND` overrides `bind`, for a container that must listen on `0.0.0.0` whatever the mounted config says. Both need a restart. |
 | `switch_threshold` | 5h-window utilization that triggers rotation (default 0.8) |
 | `switch_threshold_7d` | weekly-window utilization that makes an account unusable (default 0.98) |
 | `strategy` | `consume-first` (default), `least-used`, `most-weekly-left` or `weekly-pace` — see below |

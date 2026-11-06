@@ -109,7 +109,7 @@ def test_account_private_to_must_name_registered_devices():
         assert cfg["accounts"][0]["private_to"] == owner
 
 
-def _import_with(cfg: dict, code: str = "import rotator"):
+def _import_with(cfg: dict, code: str = "import rotator", env: dict | None = None):
     tmp = Path(tempfile.mkdtemp())
     (tmp / "tokens").mkdir()
     (tmp / "tokens" / "a.token").write_text("sk-ant-oat01-test")
@@ -117,7 +117,8 @@ def _import_with(cfg: dict, code: str = "import rotator"):
         {"accounts": ACCT, "devices": {"laptop": "dev-laptop-a1b2c3"}, **cfg}))
     return subprocess.run([sys.executable, "-c", code], cwd=Path(R.__file__).parent,
                           text=True, capture_output=True,
-                          env={**os.environ, "CLAUDE_ROTATE_CONFIG": str(tmp / "config.json")})
+                          env={**os.environ, "CLAUDE_ROTATE_CONFIG": str(tmp / "config.json"),
+                               **(env or {})})
 
 
 def test_panel_tailnet_needs_loopback_bind_and_a_bool():
@@ -129,6 +130,19 @@ def test_panel_tailnet_needs_loopback_bind_and_a_bool():
         assert child.returncode != 0 and "panel_tailnet" in child.stderr, (cfg, child.stderr)
     child = _import_with({"panel_tailnet": True, "bind": "127.0.0.1"})
     assert child.returncode == 0, child.stderr
+
+
+def test_bind_env_overrides_config_and_counts_for_panel_tailnet():
+    show = "import rotator; print(rotator.BIND, rotator.PORT)"
+    for cfg, env, want in (({}, {}, "127.0.0.1 8484"),
+                           ({"bind": "10.0.0.5", "port": 9000}, {}, "10.0.0.5 9000"),
+                           ({"bind": "10.0.0.5"}, {"CLAUDE_ROTATE_BIND": "0.0.0.0"}, "0.0.0.0 8484"),
+                           ({}, {"CLAUDE_ROTATE_BIND": ""}, "127.0.0.1 8484")):
+        child = _import_with(cfg, show, env)
+        assert child.returncode == 0 and child.stdout.strip() == want, (cfg, env, child.stderr)
+    # The override is the address actually listened on, so it is the one checked.
+    child = _import_with({"panel_tailnet": True, "bind": "127.0.0.1"}, env={"CLAUDE_ROTATE_BIND": "0.0.0.0"})
+    assert child.returncode != 0 and "panel_tailnet" in child.stderr, child.stderr
 
 
 def test_refresh_idle_model_defaults_configures_and_must_be_a_nonempty_string():

@@ -72,12 +72,12 @@ class SystemdServer(uvicorn.Server):
 async def run():
     # An absolute script path puts deploy/, not the application root, on sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from rotator import CFG, app
+    from rotator import BIND, PORT, app
 
     config = uvicorn.Config(
         app,
-        host=CFG.get("bind", "127.0.0.1"),
-        port=CFG.get("port", 8484),
+        host=BIND,
+        port=PORT,
         loop="asyncio",
         http="h11",
         workers=1,
