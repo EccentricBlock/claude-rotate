@@ -568,8 +568,10 @@ def read_token(args) -> str:
 
 
 def set_private(acct: dict, devices: list) -> None:
-    """Reserve an account for these devices: a name for one, a list for several."""
+    """Reserve an account for these devices: a name for one, a list for several.
+    An account with no priority gets 1, written out, so its owners spend it first."""
     acct["private_to"] = devices[0] if len(devices) == 1 else devices
+    acct.setdefault("priority", 1)
 
 
 def cmd_add_token(args) -> int:
@@ -667,7 +669,8 @@ def cmd_remove_user(args) -> int:
             raise Refused(f"account(s) {', '.join(a['name'] for a, _ in sole)} are private only to "
                           f"'{args.name}'; remove them or change private_to first")
         for a, owners in shared:
-            set_private(a, [o for o in owners if o != args.name])
+            left = [o for o in owners if o != args.name]
+            a["private_to"] = left[0] if len(left) == 1 else left
             out(f"account '{a['name']}' is no longer private to '{args.name}'")
         del cfg["devices"][args.name]
         write_config(cfg)

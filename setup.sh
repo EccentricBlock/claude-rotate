@@ -151,6 +151,7 @@ if acct is None:
 if priv:
     owners = priv.split(",")
     acct["private_to"] = owners[0] if len(owners) == 1 else owners
+    acct.setdefault("priority", 1)  # written out, so the owners spend it first
 else:
     acct.pop("private_to", None)
 json.dump(cfg, open("config.json", "w"), indent=2)

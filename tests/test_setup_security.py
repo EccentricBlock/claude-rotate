@@ -67,7 +67,7 @@ def main():
         assert run("add-account", "priv-account", "--private-to", "Alice_01-laptop", input=token).returncode == 0
         accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
         assert accounts["priv-account"]["private_to"] == "Alice_01-laptop"
-        assert "priority" not in accounts["priv-account"]
+        assert accounts["priv-account"]["priority"] == 1
         both = "Alice_01-laptop,alice-desktop"
         assert run("add-account", "priv-account", "--private-to", both, input=token).returncode == 0
         accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}

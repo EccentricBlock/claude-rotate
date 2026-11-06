@@ -206,11 +206,11 @@ def test_private_to_flag_and_device_removal_guard(f):
         r = f.run("add-token", "acct-priv", "--private-to", value, "--no-restart", input=TOKEN + "\n")
         assert r.returncode == 1 and message in r.stderr, (value, r)
         assert f.config.read_bytes() == config_before and not (f.tokens / "acct-priv.token").exists()
-    # One device is stored as a name, several as a list, and priority is left alone.
+    # One device is stored as a name, several as a list; a new account gets priority 1.
     r = f.run("add-token", "acct-priv", "--private-to", "alice-laptop", "--no-restart", input=TOKEN + "\n")
     assert r.returncode == 0, r
     assert f.cfg()["accounts"][-1] == {"name": "acct-priv", "token_file": "tokens/acct-priv.token",
-                                       "private_to": "alice-laptop"}
+                                       "private_to": "alice-laptop", "priority": 1}
     r = f.run("add-token", "acct-priv", "--private-to", "alice-laptop,carol-tmp", "--no-restart",
               input=TOKEN + "\n")
     assert r.returncode == 0 and f.cfg()["accounts"][-1]["private_to"] == ["alice-laptop", "carol-tmp"], r

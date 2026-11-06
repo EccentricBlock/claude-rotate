@@ -104,18 +104,37 @@ check("stranger stays on a spent shared account rather than leak a private one",
       R.pick_account("other-mac") == "shared")
 
 
-# --- 2b. owners use their private account before the shared pool ----------
+# --- 2b. priority tiers still rule; owners come first within a tier --------
+# The CLIs write "priority": 1 for a new private account; the code defaults nothing.
 fresh_state()
-R.ACCOUNTS["shared"]["priority"] = 1  # a better priority than pam's default 100
+R.ACCOUNTS["pam"]["priority"] = R.ACCOUNTS["dave"]["priority"] = 1
 R.STATE["accounts"] = {
     "shared": {"util_5h": 0.1, "util_7d": 0.1, "reset_7d": now + 100000},
     "pam":    {"util_5h": 0.5, "util_7d": 0.5, "reset_7d": now + 900000},
     "dave":   {"util_5h": 0.1, "util_7d": 0.1, "reset_7d": now + 100000},
 }
-check("owner prefers its private account over a better-priority shared one",
+check("a private account with no priority is in the default tier",
+      "priority" not in R.ACCOUNTS["shared"] and R.priority("shared") == 100)
+check("owner uses its priority 1 private account before the shared pool",
       R.pick_account("pam-mac") == "pam")
-check("a stranger still takes the shared account", R.pick_account("other-mac") == "shared")
-check("device-less ranking is still by priority", R.pick_account(None) == "shared")
+check("a stranger takes the shared account", R.pick_account("other-mac") == "shared")
+R.ACCOUNTS["shared"]["priority"] = 1
+check("owner takes its private account ahead of an equal-priority shared one",
+      R.pick_account("pam-mac") == "pam")
+check("a stranger and a device-less pick still go by strategy within the tier",
+      R.pick_account("other-mac") == "shared" and R.pick_account(None) == "shared")
+R.ACCOUNTS["pam"]["priority"] = 2
+check("a private p2 draws after a shared p1", R.pick_account("pam-mac") == "shared")
+R.ACCOUNTS["shared"]["priority"] = 2
+check("a private p2 draws before a shared p2", R.pick_account("pam-mac") == "pam")
+del R.ACCOUNTS["shared"]["priority"]
+R.ACCOUNTS["pam"]["priority"] = 1
+check("a shared account at the default priority is behind a private p1",
+      R.pick_account("pam-mac") == "pam")
+del R.ACCOUNTS["pam"]["priority"]
+check("a private account with no priority draws with the default tier, owner first",
+      R.pick_account("pam-mac") == "pam")
+R.ACCOUNTS["pam"]["priority"] = 1
 R.STATE["accounts"]["pam"]["util_5h"] = 0.9  # over the 0.8 threshold
 check("owner moves to the shared pool once its private account is spent",
       R.pick_account("pam-mac") == "shared")
@@ -131,7 +150,6 @@ asyncio.run(R.note_response("shared", headers(u5=0.2, u7=0.2), 200, device="pam-
 check("owner returns to its private account when it has room",
       R.STATE["device_accounts"]["pam-mac"] == "pam"
       and R.STATE["events"][-1]["reason"] == "priority_recovery")
-del R.ACCOUNTS["shared"]["priority"]
 
 # A first-time device that owns an account starts on it, not on the global active one.
 fresh_state(active="shared")

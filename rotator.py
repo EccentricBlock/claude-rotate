@@ -456,10 +456,10 @@ def usable(name: str) -> bool:
 
 
 def rank(name: str, device: str | None) -> tuple[int, int]:
-    """Sort key for preference: accounts reserved for this device come before
-    every shared account, and `priority` orders accounts within each group.
-    With no device, only priority counts."""
-    return (0 if device and device in owners(name) else 1, priority(name))
+    """Sort key for preference: `priority` tiers come first, and within a tier the
+    accounts reserved for this device come before the rest. With no device, only
+    priority counts."""
+    return (priority(name), 0 if device and device in owners(name) else 1)
 
 
 def owners(name: str) -> list[str]:
@@ -544,9 +544,9 @@ def pick_account(device: str | None = None) -> str | None:
     reset counts as 0), and available to this device: a private account is only
     a candidate for the device it is reserved for, in every tier below, so a
     device with nothing else left gets None rather than another's private
-    account. Tiers come first: an account reserved for this device beats every
-    shared one, then a lower `priority` beats a higher one (see rank()), and the
-    strategy orders accounts *within* a tier.
+    account. Tiers come first: a lower `priority` beats a higher one, and within a
+    tier an account reserved for this device beats the shared ones (see rank());
+    the strategy orders accounts within that.
 
     consume-first (default): burn the usable account whose weekly window resets
     soonest — weekly quota is use-it-or-lose-it, so spend the perishable one.
