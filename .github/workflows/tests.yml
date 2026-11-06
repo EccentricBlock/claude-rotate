@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # image.yml runs these tests before it publishes an image.
+  workflow_call:
 
 jobs:
   tests:
