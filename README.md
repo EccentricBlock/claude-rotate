@@ -829,14 +829,27 @@ Changes made in each fork since it diverged from its parent. Newest fork first.
 
 ### mrglrlgrlgrl/claude-rotate (this repo)
 
-Based on clement-z `56ef19e`.
+Based on clement-z `56ef19e`
+([compare](https://github.com/mrglrlgrlgrl/claude-rotate/compare/56ef19e...main)).
+
+**Merged from other forks**
 
 - Merged [doxaras/claude-rotate#4](https://github.com/doxaras/claude-rotate/pull/4) (by Dave Marsden, 9 commits, authorship preserved): `most-weekly-left` and `weekly-pace` rotation strategies, a reserve band above the switch thresholds, and rotation off closed/free accounts (403/404 on `/v1/messages`) with backoff recovery.
+- Took private accounts from kamal/claude-rotate with authorship preserved, leaving out its admin dashboard and join page: `private_to` with per-device rotation pointers, and `--private-to` on `setup.sh add-account` ([kamal 98c5520](https://github.com/kamal/claude-rotate/commit/98c5520), [kamal ca5d02b](https://github.com/kamal/claude-rotate/commit/ca5d02b)).
+
+**Rotation policy**
+
 - Fixed [doxaras/claude-rotate#3](https://github.com/doxaras/claude-rotate/issues/3): the all-blocked fallback and the hold-until-reset wait rank accounts by when they can serve again, and a rejected account is never treated as usable on a stale reading.
 - Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account also used in chat is not drained before the working week ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
+- `accounts[].private_to` names one or more devices that alone may use an account; within its priority tier they use it before the shared accounts. `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token` takes a comma list and writes `priority: 1` for a new account ([74d23ae](https://github.com/mrglrlgrlgrl/claude-rotate/commit/74d23ae), [3da39c2](https://github.com/mrglrlgrlgrl/claude-rotate/commit/3da39c2), [fec60f9](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fec60f9), [af3fc70](https://github.com/mrglrlgrlgrl/claude-rotate/commit/af3fc70)).
+
+**Usage tracking**
+
 - Made the idle refresh's probe model configurable with `refresh_idle_model`, and documented the refresh's daily cost per idle account ([05f1c6e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/05f1c6e)).
+
+**Panel**
+
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
-- Took private accounts from kamal/claude-rotate (authorship preserved, admin dashboard and join page left out): `accounts[].private_to` reserves an account for one or more devices that use it before the shared pool, `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token`, and a panel badge ([kamal 98c5520](https://github.com/kamal/claude-rotate/commit/98c5520), [kamal ca5d02b](https://github.com/kamal/claude-rotate/commit/ca5d02b)).
 
 ### clement-z/claude-rotate
 
