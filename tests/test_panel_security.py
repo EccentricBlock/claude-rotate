@@ -23,7 +23,7 @@ const value = '<mark data-audit="marker">&\'"</mark>';
 const elements = {}, urls = [], replaced = [];
 const usage = {requests:1,input_tokens:1,output_tokens:1,cache_read:0,cache_write:0,cost_usd:0};
 const stats = {devices:{[value]:{last_model:value,last_account:value,key_suffix:value}},alerts:[{level:'warn',text:value}],by_device:{[value]:usage},by_model:{[value]:usage},by_account:{[value]:usage},periods:{since:value,'7d':{device:{[value]:usage},model:{[value]:usage}},'30d':{device:{[value]:usage},model:{[value]:usage}},all:{device:{[value]:usage,[value+'-gone']:usage},model:{[value]:usage}},trend:{[value]:[0,1,2]}}};
-const status = {accounts:{[value]:{priority:100,reset_5h:1793883600,reset_7d:1793883600,reset_5h_in_min:30,reset_7d_in_h:50}},active_account:value,strategy:value,switch_threshold:.8,switch_threshold_7d:.98,recent_events:[{ts:value,from:value,to:value,reason:value}],weekly:{series:[[0,0,100],[3600,10,100]],projection:[[3600,10,100],[7200,100,100]],rate_per_day:5,eta:7200,back:9000,back_account:value,capacity:200}};
+const status = {accounts:{[value]:{priority:100,private_to:value,reset_5h:1793883600,reset_7d:1793883600,reset_5h_in_min:30,reset_7d_in_h:50}},active_account:value,strategy:value,switch_threshold:.8,switch_threshold_7d:.98,recent_events:[{ts:value,from:value,to:value,reason:value}],weekly:{series:[[0,0,100],[3600,10,100]],projection:[[3600,10,100],[7200,100,100]],rate_per_day:5,eta:7200,back:9000,back_account:value,capacity:200}};
 const context = vm.createContext({URL,URLSearchParams,location:{search:'?key=fake-viewer-key',href:'http://proxy/rotate/panel?key=fake-viewer-key'},history:{replaceState:(_a,_b,url)=>replaced.push(url)},document:{getElementById:id=>elements[id]??=( {innerHTML:'',textContent:''} )},setInterval:()=>{},fetch:async(url,opts)=>{urls.push({url,opts});return {json:async()=>url.includes('/status')?status:stats}}});
 (async()=>{
   vm.runInContext(script,context,{timeout:1000});
@@ -36,6 +36,7 @@ const context = vm.createContext({URL,URLSearchParams,location:{search:'?key=fak
     assert(!elements[id].innerHTML.includes('<mark'),id+' contains raw markup');
     assert(elements[id].innerHTML.includes('&lt;mark'),id+' lost escaped text');
   }
+  assert(elements.accounts.innerHTML.includes('private to &lt;mark'),'private badge missing or unescaped');
   const titles=elements.accounts.innerHTML.match(/title="[^"]*2026-11-05 13:00 UTC"/g)||[];
   assert.equal(titles.length,2,'5h and 7d reset spans need a UTC title');
   console.log('panel JavaScript security checks passed');

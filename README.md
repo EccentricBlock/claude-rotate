@@ -346,7 +346,8 @@ rate-limit headers:
 - **Accounts** — live 5-hour and weekly meters (from Anthropic's own headers)
   with a tick at the switch threshold, reset countdowns, upstream status and
   the active account. Hover a reset countdown for the exact reset time in your
-  browser's time zone and in UTC.
+  browser's time zone and in UTC. A private account carries a "private to
+  <device>" badge.
 - **Weekly quota, all accounts** — the enabled accounts' current weekly
   usage, summed (blue), against their combined capacity (orange: 100% per
   account, scaled by `accounts[].weight`). Usage drops at each account's weekly
@@ -374,7 +375,7 @@ The 24 h figures come from the audit log. Longer periods come from
 minute. On first start it is rebuilt once from `audit.jsonl` and its rotated
 copies, so all time reaches back as far as those logs do.
 
-JSON endpoints: `/rotate/status` (accounts + switch events) and
+JSON endpoints: `/rotate/status` (accounts, each with its `private_to` owner or null, + switch events) and
 `/rotate/stats` (rollups, alerts and the longer `periods`), same `?key=` or `Authorization: Bearer`
 auth. Audit trail: `logs/audit.jsonl`, one JSON record per request.
 
