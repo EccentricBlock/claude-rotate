@@ -11,6 +11,12 @@ Max/Pro subscriptions and switches accounts automatically when one hits its
 rate-limit window — with a built-in analytics panel showing quota gauges,
 per-device consumption, and cost-equivalent dollars.
 
+> **Fork lineage:** this repository is a fork of
+> [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate), which is
+> itself a fork of the original work at
+> [doxaras/claude-rotate](https://github.com/doxaras/claude-rotate).
+> See [Fork changes](#fork-changes) for what each fork added.
+
 One process, one config file, no database. Built for individual developers who
 own more than one subscription and are tired of "You've hit your session
 limit".
@@ -45,6 +51,7 @@ onto the new account. Reproducible numbers in
 [Operations](#operations) ·
 [Comparison](#comparison-with-similar-projects) ·
 [Security](#security-notes) ·
+[Fork changes](#fork-changes) ·
 [License](#license)
 
 ## How it works
@@ -742,8 +749,53 @@ every new claim about Anthropic behavior gets verified against the live API
 before being relied on (the `phase0_proxy.py` harness exists for exactly
 that).
 
+## Fork changes
+
+Changes made in each fork since it diverged from its parent. Newest fork first.
+
+### mrglrlgrlgrl/claude-rotate (this repo)
+
+Based on clement-z `56ef19e`. No changes yet.
+
+### clement-z/claude-rotate
+
+Based on doxaras `19529c6`
+([compare](https://github.com/clement-z/claude-rotate/compare/19529c6...56ef19e)).
+16 commits, 2026-10-24 → 2026-11-06.
+
+**Security & service hardening**
+
+- Harden credential boundaries, dashboard rendering and request handling; `SECURITY.md` added ([e19d5b3](https://github.com/clement-z/claude-rotate/commit/e19d5b3)).
+- Harden the Debian systemd service and bound resource use on small VPSes ([89ec74a](https://github.com/clement-z/claude-rotate/commit/89ec74a)).
+- Let tailnet users open the panel without a device key via `panel_tailnet` (loopback bind only) ([de813a1](https://github.com/clement-z/claude-rotate/commit/de813a1)).
+
+**Install & administration**
+
+- Managed installer/uninstaller (`install.sh`, `uninstall.sh`) and `claude-rotate-admin` for local account/device administration ([fbf026f](https://github.com/clement-z/claude-rotate/commit/fbf026f)).
+- `OPERATIONS.md` documenting routine service operations ([d5c4d6b](https://github.com/clement-z/claude-rotate/commit/d5c4d6b)).
+
+**Usage tracking**
+
+- Refresh idle accounts' usage every `refresh_idle_s` with a 1-token request ([969ed52](https://github.com/clement-z/claude-rotate/commit/969ed52)).
+- Keep 7-day, 30-day and all-time totals per device and model in `device_usage.json` ([4b89abb](https://github.com/clement-z/claude-rotate/commit/4b89abb)).
+
+**Weekly quota chart & forecast**
+
+- Chart weekly quota across accounts and estimate when it runs out; `accounts[].weight` for mixed plan sizes ([206e956](https://github.com/clement-z/claude-rotate/commit/206e956), [9cc2167](https://github.com/clement-z/claude-rotate/commit/9cc2167)).
+- Project 7 days ahead through shortfalls, shade periods at the limit, and measure the rate only over time with quota left ([c625633](https://github.com/clement-z/claude-rotate/commit/c625633), [5047e8d](https://github.com/clement-z/claude-rotate/commit/5047e8d), [0d8493e](https://github.com/clement-z/claude-rotate/commit/0d8493e)).
+- Plot summed weekly usage against capacity, dropping at each reset; scrollable history around now ([a02cebb](https://github.com/clement-z/claude-rotate/commit/a02cebb), [56ef19e](https://github.com/clement-z/claude-rotate/commit/56ef19e)).
+
+**Panel**
+
+- Redesign: run-out headline, tiles, meters, per-device 24 h / 7 d / 30 d / all-time usage ([948691e](https://github.com/clement-z/claude-rotate/commit/948691e)).
+- Phone layout and tooltip position fix ([277cdb8](https://github.com/clement-z/claude-rotate/commit/277cdb8)).
+
 ## License
 
 [MIT](LICENSE) © 2026 John Doxaras. The Terms-of-Service note at the top of
 this README is part of the deal: this software is for rotating accounts *you*
 own and pay for, at your own risk.
+
+This repository is a fork of [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate),
+itself a fork of the original [doxaras/claude-rotate](https://github.com/doxaras/claude-rotate);
+the original copyright notice is retained in [LICENSE](LICENSE).
