@@ -926,6 +926,12 @@ Based on clement-z `56ef19e`
 - Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account needed for other purposes, such as chat through the week, is not drained too quickly ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
 - `accounts[].private_to` names one or more devices that alone may use an account; within its priority tier they use it before the shared accounts. `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token` takes a comma list and writes `priority: 1` for a new account ([74d23ae](https://github.com/mrglrlgrlgrl/claude-rotate/commit/74d23ae), [3da39c2](https://github.com/mrglrlgrlgrl/claude-rotate/commit/3da39c2), [fec60f9](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fec60f9), [af3fc70](https://github.com/mrglrlgrlgrl/claude-rotate/commit/af3fc70)).
 
+**Service and deployment**
+
+- Added hot config reload: `config.json` and the token files are reloaded when they change (polled every `reload_poll_s`) or on `SIGHUP`, an invalid file keeps the running config and is reported in `/rotate/status`, and `setup.sh` and `claude-rotate-admin` reload the service instead of restarting it ([4cf2fce](https://github.com/mrglrlgrlgrl/claude-rotate/commit/4cf2fce), [ca5344c](https://github.com/mrglrlgrlgrl/claude-rotate/commit/ca5344c), [19f8a27](https://github.com/mrglrlgrlgrl/claude-rotate/commit/19f8a27)).
+- Added `CLAUDE_ROTATE_BIND`, which overrides `bind` ([35f4624](https://github.com/mrglrlgrlgrl/claude-rotate/commit/35f4624)).
+- Added a Docker image and compose example, published to GHCR for amd64 and arm64 ([fdcff28](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fdcff28), [35da23e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/35da23e)).
+
 **Usage tracking**
 
 - Made the idle refresh's probe model configurable with `refresh_idle_model`, and documented the refresh's daily cost per idle account ([05f1c6e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/05f1c6e)).
