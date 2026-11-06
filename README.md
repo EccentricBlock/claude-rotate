@@ -404,7 +404,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `devices{}` | `name → device key`; key is what the device puts in `CLAUDE_CODE_OAUTH_TOKEN` |
 | `accounts[].priority` | lower = preferred; accounts form tiers, backup tiers only used when every preferred account is spent (default 100) |
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
-| `accounts[].private_to` | a device name: the account is served *only* to that device (its owner rides the shared pool first and rotates onto it when that is spent); every other device never touches it. See "Preferring one account over another". |
+| `accounts[].private_to` | a device name: the account is served *only* to that device; every other device never touches it. `setup.sh add-account --private-to` also sets `priority` to 1. See "Preferring one account over another". |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
 | `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
 | `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
@@ -525,11 +525,14 @@ Combine with `strategy` for the remaining temperament choice: `consume-first`
 
 **Level 3 — pin an account to a device.** `"private_to": "<device name>"` marks
 an account as belonging to one device: it is served *only* to that device. The
-owner still rides the shared pool first and rotates onto their private account
-when the shared pool is spent (it's their reserve); every other device is never
-routed to it. The device name must be a registered device in `devices{}`. Each
-device keeps its own current account (`device_accounts` in `state.json`), so one
-device's switch never moves another's. Set it in `config.json`, or with the CLI:
+owner competes for it like any other account, by `priority` (Level 1); every
+other device is never routed to it. `./setup.sh add-account --private-to` sets
+`priority` to 1, so the owner spends their own quota before the shared pool; a
+`private_to` written by hand keeps the default priority, so the owner's device
+chooses between it and the shared accounts by `strategy`. The device name must be a registered device in
+`devices{}`. Each device keeps its own current account (`device_accounts` in
+`state.json`), so one device's switch never moves another's. Set it in
+`config.json`, or with the CLI:
 
 ```sh
 ./setup.sh add-account max-20x --private-to kamal-mbp
