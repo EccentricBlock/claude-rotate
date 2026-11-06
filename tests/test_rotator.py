@@ -215,6 +215,100 @@ check("#3: earliest_relief skips the week-exhausted account's stale 5h reset",
       abs(R.earliest_relief() - R.STATE["accounts"]["b"]["reset_5h"]) < 1)
 R.ACCOUNTS = saved_accts
 
+# 1l. accounts[].weekly_cap: allowance ramps up through the week, reaching
+# weekly_cap at cap_lookahead before the weekly reset and never exceeding it.
+D_ = 86400
+check("top-level cap_lookahead defaults to 12h", R.CAP_LOOKAHEAD_S == 12 * H_)
+check("duration_s parses m, h and d",
+      (R.duration_s("30m"), R.duration_s("12h"), R.duration_s("2d")) == (1800, 43200, 172800))
+check("duration_s rejects anything else",
+      all(R.duration_s(v) is None for v in ("12", "h", "1.5h", "12x", "", " 2d", 12, None)))
+saved_accts, saved_lookahead = R.ACCOUNTS, R.CAP_LOOKAHEAD_S
+R.ACCOUNTS = {"a": {"name": "a", "weekly_cap": 0.5}, "b": {"name": "b"}}
+R.CAP_LOOKAHEAD_S = 12 * H_
+def cap_state(a_extra=None, b_extra=None, active="b"):
+    fresh_state(active)
+    R.STATE["last_switch_ts"] = time.time()  # inside the cooldown
+    R.STATE["accounts"] = {
+        "a": dict({"util_5h": 0.1, "util_7d": 0.2, "reset_7d": now + 6 * D_}, **(a_extra or {})),
+        "b": dict({"util_5h": 0.1, "util_7d": 0.3, "reset_7d": now + 6.5 * D_}, **(b_extra or {})),
+    }
+cap_state()
+check("cap_allowance is small early in the week (one day gone, 12h lookahead)",
+      abs(R.cap_allowance("a") - 0.5 * 36 / 168) < 1e-4)
+R.STATE["accounts"]["a"]["reset_7d"] = now + 12 * H_
+check("cap_allowance equals weekly_cap at lookahead before the reset",
+      R.cap_allowance("a") == 0.5)
+R.STATE["accounts"]["a"]["reset_7d"] = now + 6 * H_
+check("cap_allowance stays at weekly_cap inside the lookahead window",
+      R.cap_allowance("a") == 0.5)
+del R.STATE["accounts"]["a"]["reset_7d"]
+check("cap_allowance with an unknown reset is weekly_cap", R.cap_allowance("a") == 0.5)
+R.STATE["accounts"]["a"]["reset_7d"] = now - 10
+check("cap_allowance with a passed reset is weekly_cap", R.cap_allowance("a") == 0.5)
+cap_state()
+R.CAP_LOOKAHEAD_S = D_
+check("a configured top-level cap_lookahead is honoured",
+      abs(R.cap_allowance("a") - 0.5 * 48 / 168) < 1e-4)
+R.ACCOUNTS["a"]["cap_lookahead"] = "2d"
+check("accounts[].cap_lookahead overrides the top-level one",
+      abs(R.cap_allowance("a") - 0.5 * 72 / 168) < 1e-4)
+del R.ACCOUNTS["a"]["cap_lookahead"]
+R.CAP_LOOKAHEAD_S = 12 * H_
+
+# a: 20% of the week used against an allowance of about 10.7%, so cap-blocked
+check("over its allowance: not under_threshold, hard_ok, usable or reserve_spendable",
+      not (R.cap_ok("a") or R.under_threshold("a") or R.hard_ok("a")
+           or R.usable("a") or R.reserve_spendable("a")))
+R.STATE["accounts"]["a"]["util_7d"] = 0.05
+check("under its allowance: usable", R.cap_ok("a") and R.under_threshold("a") and R.usable("a"))
+
+# usable tier: a has the soonest weekly reset and would win without the cap
+cap_state()
+check("usable tier skips a cap-blocked account", R.pick_account() == "b")
+del R.ACCOUNTS["a"]["weekly_cap"]
+check("no weekly_cap: unchanged, a wins on the soonest weekly reset",
+      R.cap_ok("a") and R.pick_account() == "a")
+R.ACCOUNTS["a"]["weekly_cap"] = 0.5
+
+# reserve tier: both over the 5h threshold, a's binding reset is sooner
+cap_state({"util_5h": 0.9, "reset_5h": now + 7200}, {"util_5h": 0.9, "reset_5h": now + 9000})
+check("reserve tier skips a cap-blocked account", R.pick_account() == "b")
+del R.ACCOUNTS["a"]["weekly_cap"]
+check("no weekly_cap: a wins the reserve tier", R.pick_account() == "a")
+R.ACCOUNTS["a"]["weekly_cap"] = 0.5
+
+# pool fallback: b is week-exhausted and serves again later than a
+cap_state({"reset_5h": now + 7200}, {"util_7d": 1.0, "reset_7d": now + 7 * D_})
+check("pool fallback: a would be served first on relief alone",
+      R.relief_ts("a") < R.relief_ts("b"))
+check("pool fallback ranks a cap-blocked account after a cap_ok one", R.pick_account() == "b")
+
+# note_response: a cap-blocked active account leaves at once (cooldown running)
+cap_state(active="a")
+v = run(R.note_response("a", headers(u5=0.1, u7=0.2, r7=now + 6 * D_), 200))
+check("cap-blocked active account is left with reason weekly_cap",
+      v == "switched" and R.STATE["active_account"] == "b"
+      and R.STATE["events"][-1]["reason"] == "weekly_cap")
+cap_state({}, {"util_5h": 1.0, "reset_5h": now + 7200, "status": "rejected",
+               "last_seen": now - 10}, active="a")
+v = run(R.note_response("a", headers(u5=0.1, u7=0.2, r7=now + 6 * D_), 200))
+check("...even when the account it leaves for is rejected",
+      v == "switched" and R.STATE["active_account"] == "b"
+      and R.STATE["events"][-1]["reason"] == "weekly_cap")
+cap_state({"util_7d": 0.05}, active="a")
+v = run(R.note_response("a", headers(u5=0.1, u7=0.05, r7=now + 6 * D_), 200))
+check("under its allowance: stays put", v is None and R.STATE["active_account"] == "a")
+
+# weekly_pace: a capped account has weekly_cap - weekly util left, times weight
+R.ACCOUNTS["a"]["weight"] = 2
+cap_state({"reset_7d": now + 100 * H_})
+check("weekly_pace of a capped account is weight * (cap - util_7d) / hours",
+      abs(R.weekly_pace("a") - 2 * (0.5 - 0.2) / 100) < 1e-4)
+check("weekly_pace of an uncapped account is unchanged",
+      abs(R.weekly_pace("b") - (1 - 0.3) / (6.5 * 24)) < 1e-4)
+R.ACCOUNTS, R.CAP_LOOKAHEAD_S = saved_accts, saved_lookahead
+
 # 2. burst 429 (util well under 1.0, no rejected status) → pace, no rotation
 fresh_state("a")
 R.STATE["accounts"] = {"a": {"util_5h": 0.4, "util_7d": 0.2}}

@@ -71,13 +71,37 @@ def test_account_weight_must_be_a_positive_number():
     _load_with({"accounts": [dict(ACCT[0], weight=0.25)], "devices": devices})
 
 
-def _import_with(cfg: dict):
+def test_account_weekly_cap_must_be_a_number_from_0_to_1():
+    devices = {"laptop": "dev-laptop-a1b2c3"}
+    for cap in (-0.1, 1.5, "0.5", True, None):
+        try:
+            _load_with({"accounts": [dict(ACCT[0], weekly_cap=cap)], "devices": devices})
+            raise AssertionError(f"weekly_cap {cap!r} must refuse startup")
+        except SystemExit as error:
+            assert "account 'a'" in str(error) and "weekly_cap" in str(error), str(error)
+    for cap in (0, 0.5, 1):
+        _load_with({"accounts": [dict(ACCT[0], weekly_cap=cap)], "devices": devices})
+
+
+def test_account_cap_lookahead_must_parse():
+    devices = {"laptop": "dev-laptop-a1b2c3"}
+    for value in ("12", "1.5h", "12x", "", 12, None):
+        try:
+            _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
+            raise AssertionError(f"cap_lookahead {value!r} must refuse startup")
+        except SystemExit as error:
+            assert "account 'a'" in str(error) and "cap_lookahead" in str(error), str(error)
+    for value in ("30m", "12h", "2d"):
+        _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
+
+
+def _import_with(cfg: dict, code: str = "import rotator"):
     tmp = Path(tempfile.mkdtemp())
     (tmp / "tokens").mkdir()
     (tmp / "tokens" / "a.token").write_text("sk-ant-oat01-test")
     (tmp / "config.json").write_text(json.dumps(
         {"accounts": ACCT, "devices": {"laptop": "dev-laptop-a1b2c3"}, **cfg}))
-    return subprocess.run([sys.executable, "-c", "import rotator"], cwd=Path(R.__file__).parent,
+    return subprocess.run([sys.executable, "-c", code], cwd=Path(R.__file__).parent,
                           text=True, capture_output=True,
                           env={**os.environ, "CLAUDE_ROTATE_CONFIG": str(tmp / "config.json")})
 
@@ -91,6 +115,17 @@ def test_panel_tailnet_needs_loopback_bind_and_a_bool():
         assert child.returncode != 0 and "panel_tailnet" in child.stderr, (cfg, child.stderr)
     child = _import_with({"panel_tailnet": True, "bind": "127.0.0.1"})
     assert child.returncode == 0, child.stderr
+
+
+def test_top_level_cap_lookahead_defaults_to_12h_and_must_parse():
+    show = "import rotator; print(rotator.CAP_LOOKAHEAD_S)"
+    for cfg, seconds in (({}, 43200), ({"cap_lookahead": "2d"}, 172800),
+                         ({"cap_lookahead": "30m"}, 1800)):
+        child = _import_with(cfg, show)
+        assert child.returncode == 0 and child.stdout.strip() == str(seconds), (cfg, child.stderr)
+    for bad in ("bogus", "12", 12, None):
+        child = _import_with({"cap_lookahead": bad})
+        assert child.returncode != 0 and "cap_lookahead" in child.stderr, (bad, child.stderr)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ GET /rotate/status (device-key auth) returns live state for the admin page.
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from collections import deque
@@ -87,6 +88,13 @@ class PrivateResponseHeaders:
         await self.app(scope, receive, send_private if scope["type"] == "http" else send)
 
 
+def duration_s(value) -> int | None:
+    """Seconds in a duration string, an integer and one unit m, h or d ("12h"),
+    or None when it does not parse."""
+    m = re.fullmatch(r"(\d+)([mhd])", value) if isinstance(value, str) else None
+    return int(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]] if m else None
+
+
 def load_config() -> dict:
     cfg = json.loads(CONFIG_PATH.read_text())
     loaded = []
@@ -94,6 +102,12 @@ def load_config() -> dict:
         w = acct.get("weight", 1)
         if type(w) not in (int, float) or not w > 0:
             raise SystemExit(f"account '{acct['name']}': weight must be a number > 0")
+        cap = acct.get("weekly_cap")
+        if "weekly_cap" in acct and (type(cap) not in (int, float) or not 0 <= cap <= 1):
+            raise SystemExit(f"account '{acct['name']}': weekly_cap must be a number from 0 to 1")
+        if "cap_lookahead" in acct and duration_s(acct["cap_lookahead"]) is None:
+            raise SystemExit(f"account '{acct['name']}': cap_lookahead must be an integer and "
+                             "one unit m, h or d, for example \"12h\"")
         path = CONFIG_PATH.parent / acct["token_file"]
         if path.exists():
             acct["token"] = path.read_text().strip()
@@ -202,6 +216,9 @@ if type(PANEL_TAILNET) is not bool:
 if PANEL_TAILNET and CFG.get("bind", "127.0.0.1") not in ("127.0.0.1", "::1", "localhost"):
     raise SystemExit("panel_tailnet needs bind 127.0.0.1 behind Tailscale Serve: on any other "
                      "address a client could send Tailscale-User-Login itself and skip the key")
+CAP_LOOKAHEAD_S = duration_s(CFG.get("cap_lookahead", "12h"))
+if CAP_LOOKAHEAD_S is None:
+    raise SystemExit("cap_lookahead must be an integer and one unit m, h or d, for example \"12h\"")
 STORAGE_ERRORS: dict = {}
 
 
@@ -304,6 +321,24 @@ def weight(name: str) -> float:
     return ACCOUNTS[name].get("weight", 1)
 
 
+def cap_allowance(name: str) -> float:
+    """Weekly use a capped account may reach now: weekly_cap scaled by how much
+    of the week has passed, counted from `lookahead` ahead. It reaches weekly_cap
+    at lookahead before the weekly reset and never exceeds it. An unknown or
+    passed reset gives weekly_cap."""
+    cap = ACCOUNTS[name]["weekly_cap"]
+    reset, now = STATE["accounts"].get(name, {}).get("reset_7d"), time.time()
+    if not reset or now >= reset:
+        return cap
+    lookahead = duration_s(ACCOUNTS[name].get("cap_lookahead")) or CAP_LOOKAHEAD_S
+    return cap * min(max((now + lookahead - (reset - 604800)) / 604800, 0.0), 1.0)
+
+
+def cap_ok(name: str) -> bool:
+    """Under the weekly pacing cap, or no cap set."""
+    return "weekly_cap" not in ACCOUNTS[name] or util_7d(name) < cap_allowance(name)
+
+
 def disabled(name: str) -> bool:
     return bool(ACCOUNTS[name].get("disabled"))
 
@@ -342,6 +377,7 @@ def on_probation(name: str) -> bool:
 
 def under_threshold(name: str) -> bool:
     return (not disabled(name) and not account_bad(name) and not rejected(name)
+            and cap_ok(name)
             and utilization(name) < THRESHOLD and util_7d(name) < THRESHOLD_7D)
 
 
@@ -356,8 +392,10 @@ def rejected(name: str) -> bool:
 
 def hard_ok(name: str) -> bool:
     """Can still serve a request at all: not disabled, not a dead/closed account,
-    under the hard limit in both windows, not currently rejected."""
+    under the hard limit in both windows, not currently rejected, under its
+    weekly pacing cap."""
     return (not disabled(name) and not account_bad(name) and not rejected(name)
+            and cap_ok(name)
             and utilization(name) < HARD_LIMIT and util_7d(name) < HARD_LIMIT)
 
 
@@ -413,9 +451,10 @@ def weekly_reset(name: str) -> float:
 def weekly_pace(name: str) -> float:
     """Share of the weekly quota that must be used per hour from now on to not
     lose any of it: weight * (1 - weekly util) / hours until the weekly reset.
+    A capped account counts (weekly_cap - weekly util) as its quota left.
     Higher = more perishable. An unknown or passed reset counts as a full week;
     the hours are floored at 1 so the score stays finite near the reset."""
-    left = max(0.0, 1.0 - util_7d(name))
+    left = max(0.0, ACCOUNTS[name].get("weekly_cap", 1.0) - util_7d(name))
     reset = STATE["accounts"].get(name, {}).get("reset_7d")
     now = time.time()
     hours = (reset - now) / 3600 if reset and reset > now else 168.0
@@ -461,7 +500,8 @@ def pick_account() -> str | None:
     instead of stopping at the thresholds.
     If nothing is hard_ok: the non-disabled account that can serve again soonest
     (relief_ts): a week-exhausted account counts from its weekly reset, since a
-    5h reset doesn't help it.
+    5h reset doesn't help it. An account over its weekly_cap allowance ranks
+    after every account that is not.
     """
     under = [n for n in ACCOUNTS if usable(n)]
     if under:
@@ -485,7 +525,7 @@ def pick_account() -> str | None:
             or [n for n in ACCOUNTS if not disabled(n)])
     if not pool:
         return None
-    return min(pool, key=lambda n: (relief_ts(n), priority(n)))
+    return min(pool, key=lambda n: (not cap_ok(n), relief_ts(n), priority(n)))
 
 
 def record_switch(frm: str, to: str, reason: str, now: float) -> None:
@@ -582,6 +622,8 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
                     reason = "quota_exhausted"  # hard stop: no cooldown, no margin
                 elif disabled(account):
                     reason = "account_disabled"  # hard rule: leave immediately
+                elif not cap_ok(account):
+                    reason = "weekly_cap"  # over its pacing allowance: no cooldown, no margin
                 elif over and cooled and (usable(nxt) or not hard_ok(account)):
                     # Hysteresis: only move to a meaningfully better account, so
                     # two accounts hovering at the line never ping-pong. A move

@@ -404,6 +404,9 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `accounts[].priority` | lower = preferred; accounts form tiers, backup tiers only used when every preferred account is spent (default 100) |
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
+| `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
+| `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
+| `accounts[].cap_lookahead` | overrides `cap_lookahead` for this account (default: the top-level value) |
 | `switch_threshold` | 5h-window utilization that triggers rotation (default 0.8) |
 | `switch_threshold_7d` | weekly-window utilization that makes an account unusable (default 0.98) |
 | `strategy` | `consume-first` (default), `least-used`, `most-weekly-left` or `weekly-pace` — see below |
@@ -451,6 +454,18 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
   somewhere to rotate into. Forced switches (5h spent,
   quota rejected) can use the reserve. `/rotate/status` shows each account's
   `weekly_pace_pct_per_h` and `fresh_session`.
+- **Weekly cap** (`accounts[].weekly_cap`): an account with a cap may use
+  `weekly_cap × (time into the week + cap_lookahead) / one week` of its weekly
+  window, never more than `weekly_cap`. Early in the week the allowance is
+  small, which leaves quota for chat use outside the proxy; it reaches
+  `weekly_cap` `cap_lookahead` before the weekly reset, so the last evening
+  burns the account down to the cap. An account at or over its allowance is
+  neither usable nor reserve, and it ranks after every other account in the
+  all-blocked fallback. If it is the active account it is left at once, with
+  no cooldown or margin, and the switch is logged as `weekly_cap`. A manual
+  `claude-rotate-admin rotate` onto such an account is left on its next reply.
+  With `weekly-pace`, a capped account's quota left is
+  `weekly_cap − weekly utilization`.
 - If nothing is usable, the proxy waits on the account that can serve again
   soonest. A week-exhausted account counts from its weekly reset (a 5h reset
   can't help it), and an account whose last response was a quota rejection
