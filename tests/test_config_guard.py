@@ -83,6 +83,18 @@ def test_account_weekly_cap_must_be_a_number_from_0_to_1():
         _load_with({"accounts": [dict(ACCT[0], weekly_cap=cap)], "devices": devices})
 
 
+def test_account_weekly_pacing_must_be_a_boolean():
+    devices = {"laptop": "dev-laptop-a1b2c3"}
+    for value in (1, "yes", None):
+        try:
+            _load_with({"accounts": [dict(ACCT[0], weekly_pacing=value)], "devices": devices})
+            raise AssertionError(f"weekly_pacing {value!r} must refuse startup")
+        except R.ConfigError as error:
+            assert str(error) == "account 'a': weekly_pacing must be true or false", str(error)
+    for acct in (dict(ACCT[0], weekly_pacing=True), dict(ACCT[0], weekly_pacing=False), ACCT[0]):
+        _load_with({"accounts": [acct], "devices": devices})
+
+
 def test_account_cap_lookahead_must_parse():
     devices = {"laptop": "dev-laptop-a1b2c3"}
     for value in ("12", "1.5h", "12x", "", 12, None):

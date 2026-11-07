@@ -224,7 +224,8 @@ check("duration_s parses m, h and d",
 check("duration_s rejects anything else",
       all(R.duration_s(v) is None for v in ("12", "h", "1.5h", "12x", "", " 2d", 12, None)))
 saved_accts, saved_lookahead = R.ACCOUNTS, R.CAP_LOOKAHEAD_S
-R.ACCOUNTS = {"a": {"name": "a", "weekly_cap": 0.5}, "b": {"name": "b"}}
+R.ACCOUNTS = {"a": {"name": "a", "weekly_cap": 0.5, "weekly_pacing": True},
+              "b": {"name": "b"}}
 R.CAP_LOOKAHEAD_S = 12 * H_
 def cap_state(a_extra=None, b_extra=None, active="b"):
     fresh_state(active)
@@ -266,17 +267,17 @@ check("under its allowance: usable", R.cap_ok("a") and R.under_threshold("a") an
 # usable tier: a has the soonest weekly reset and would win without the cap
 cap_state()
 check("usable tier skips a cap-blocked account", R.pick_account() == "b")
-del R.ACCOUNTS["a"]["weekly_cap"]
+del R.ACCOUNTS["a"]["weekly_cap"], R.ACCOUNTS["a"]["weekly_pacing"]
 check("no weekly_cap: unchanged, a wins on the soonest weekly reset",
       R.cap_ok("a") and R.pick_account() == "a")
-R.ACCOUNTS["a"]["weekly_cap"] = 0.5
+R.ACCOUNTS["a"]["weekly_cap"], R.ACCOUNTS["a"]["weekly_pacing"] = 0.5, True
 
 # reserve tier: both over the 5h threshold, a's binding reset is sooner
 cap_state({"util_5h": 0.9, "reset_5h": now + 7200}, {"util_5h": 0.9, "reset_5h": now + 9000})
 check("reserve tier skips a cap-blocked account", R.pick_account() == "b")
-del R.ACCOUNTS["a"]["weekly_cap"]
+del R.ACCOUNTS["a"]["weekly_cap"], R.ACCOUNTS["a"]["weekly_pacing"]
 check("no weekly_cap: a wins the reserve tier", R.pick_account() == "a")
-R.ACCOUNTS["a"]["weekly_cap"] = 0.5
+R.ACCOUNTS["a"]["weekly_cap"], R.ACCOUNTS["a"]["weekly_pacing"] = 0.5, True
 
 # pool fallback: b is week-exhausted and serves again later than a
 cap_state({"reset_5h": now + 7200}, {"util_7d": 1.0, "reset_7d": now + 7 * D_})
@@ -307,6 +308,29 @@ check("weekly_pace of a capped account is weight * (cap - util_7d) / hours",
       abs(R.weekly_pace("a") - 2 * (0.5 - 0.2) / 100) < 1e-4)
 check("weekly_pace of an uncapped account is unchanged",
       abs(R.weekly_pace("b") - (1 - 0.3) / (6.5 * 24)) < 1e-4)
+
+# weekly_pacing off (the default): weekly_cap is a flat maximum
+for flat in ({}, {"weekly_pacing": False}):
+    R.ACCOUNTS["a"] = dict({"name": "a", "weekly_cap": 0.5}, **flat)
+    cap_state({"util_7d": 0.5})
+    check(f"flat cap {flat}: allowance is weekly_cap one day into the week",
+          R.cap_allowance("a") == 0.5)
+    check(f"flat cap {flat}: at the cap is blocked, not usable",
+          not R.cap_ok("a") and not R.usable("a"))
+    R.STATE["accounts"]["a"]["util_7d"] = 0.4
+    check(f"flat cap {flat}: under the cap is cap_ok and usable",
+          R.cap_ok("a") and R.usable("a"))
+# weekly_pacing on with no weekly_cap ramps up to 1.0
+R.ACCOUNTS["a"] = {"name": "a", "weekly_pacing": True}
+cap_state({"util_7d": 0.3})
+check("pacing with no cap: allowance is 36/168 one day into the week",
+      abs(R.cap_allowance("a") - 36 / 168) < 1e-4)
+check("pacing with no cap: above the allowance is not cap_ok", not R.cap_ok("a"))
+R.STATE["accounts"]["a"]["util_7d"] = 0.1
+check("pacing with no cap: under the allowance is cap_ok", R.cap_ok("a"))
+R.ACCOUNTS["a"] = {"name": "a"}
+cap_state({"util_7d": 0.9})
+check("neither weekly_cap nor weekly_pacing: cap_ok at util_7d 0.9", R.cap_ok("a"))
 R.ACCOUNTS, R.CAP_LOOKAHEAD_S = saved_accts, saved_lookahead
 
 # 2. burst 429 (util well under 1.0, no rejected status) → pace, no rotation

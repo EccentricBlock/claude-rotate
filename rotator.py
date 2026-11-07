@@ -133,6 +133,8 @@ def load_config() -> tuple[dict, tuple]:
         cap = acct.get("weekly_cap")
         if "weekly_cap" in acct and (type(cap) not in (int, float) or not 0 <= cap <= 1):
             raise ConfigError(f"account '{acct['name']}': weekly_cap must be a number from 0 to 1")
+        if "weekly_pacing" in acct and type(acct["weekly_pacing"]) is not bool:
+            raise ConfigError(f"account '{acct['name']}': weekly_pacing must be true or false")
         if "cap_lookahead" in acct and duration_s(acct["cap_lookahead"]) is None:
             raise ConfigError(f"account '{acct['name']}': cap_lookahead must be an integer and "
                              "one unit m, h or d, for example \"12h\"")
@@ -469,21 +471,24 @@ def weight(name: str) -> float:
 
 
 def cap_allowance(name: str) -> float:
-    """Weekly use a capped account may reach now: weekly_cap scaled by how much
-    of the week has passed, counted from `lookahead` ahead. It reaches weekly_cap
+    """Weekly use an account may reach now. Without weekly_pacing this is
+    weekly_cap, flat. With it, weekly_cap (1.0 when unset) scaled by how much
+    of the week has passed, counted from `lookahead` ahead. It reaches the cap
     at lookahead before the weekly reset and never exceeds it. An unknown or
-    passed reset gives weekly_cap."""
-    cap = ACCOUNTS[name]["weekly_cap"]
+    passed reset gives the cap."""
+    cap = ACCOUNTS[name].get("weekly_cap", 1.0)
     reset, now = STATE["accounts"].get(name, {}).get("reset_7d"), time.time()
-    if not reset or now >= reset:
+    if not ACCOUNTS[name].get("weekly_pacing") or not reset or now >= reset:
         return cap
     lookahead = duration_s(ACCOUNTS[name].get("cap_lookahead")) or CAP_LOOKAHEAD_S
     return cap * min(max((now + lookahead - (reset - 604800)) / 604800, 0.0), 1.0)
 
 
 def cap_ok(name: str) -> bool:
-    """Under the weekly pacing cap, or no cap set."""
-    return "weekly_cap" not in ACCOUNTS[name] or util_7d(name) < cap_allowance(name)
+    """Under the weekly allowance, or the account has no cap and no pacing."""
+    acct = ACCOUNTS[name]
+    return not ("weekly_cap" in acct or acct.get("weekly_pacing")) \
+        or util_7d(name) < cap_allowance(name)
 
 
 def disabled(name: str) -> bool:
