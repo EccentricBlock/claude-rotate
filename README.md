@@ -408,9 +408,10 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
 | `accounts[].private_to` | a device name, or a list of device names: the account is served *only* to those devices; every other device never touches it. Within its priority tier its owners use it first. `--private-to` writes `priority: 1` for a new account. See "Preferring one account over another". |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
-| `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use. The allowance ramps up through the week so the account is not drained early (default: no cap). See "Rotation policy". |
-| `cap_lookahead` | how long before an account's weekly reset its `weekly_cap` opens to the full fraction: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`) |
-| `accounts[].cap_lookahead` | overrides `cap_lookahead` for this account (default: the top-level value) |
+| `accounts[].weekly_cap` | fraction of the weekly window, 0 to 1, that this account may use: a flat maximum (default: no cap). With `weekly_pacing: true` the allowance ramps up to it through the week. See "Rotation policy". |
+| `accounts[].weekly_pacing` | `true` or `false` (default `false`): ramp this account's weekly allowance up through the week, to `weekly_cap` or to the full week when no cap is set, so the account is not drained early. See "Rotation policy". |
+| `cap_lookahead` | how long before an account's weekly reset the paced allowance opens to the full cap: an integer and one unit `m`, `h` or `d`, for example `"12h"` (default `"12h"`). Applies only to accounts with `weekly_pacing: true`. |
+| `accounts[].cap_lookahead` | overrides `cap_lookahead` for this account (default: the top-level value). Applies only with `weekly_pacing: true`. |
 | `bind` / `port` | address and port the proxy listens on (defaults `"127.0.0.1"` / 8484). The environment variable `CLAUDE_ROTATE_BIND` overrides `bind`, for a container that must listen on `0.0.0.0` whatever the mounted config says. Both need a restart. |
 | `reload_poll_s` | seconds between checks of `config.json` and the token files for changes, which are then reloaded (default 5; 0 = off, leaving `SIGHUP`). Needs a restart. See "Reloading the configuration". |
 | `switch_threshold` | 5h-window utilization that triggers rotation (default 0.8) |
@@ -495,12 +496,17 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
   somewhere to rotate into. Forced switches (5h spent,
   quota rejected) can use the reserve. `/rotate/status` shows each account's
   `weekly_pace_pct_per_h` and `fresh_session`.
-- **Weekly cap** (`accounts[].weekly_cap`): an account with a cap may use
-  `weekly_cap × (time into the week + cap_lookahead) / one week` of its weekly
-  window, never more than `weekly_cap`. Early in the week the allowance is
-  small, which leaves quota for chat use outside the proxy; it reaches
-  `weekly_cap` `cap_lookahead` before the weekly reset, so the last evening
-  burns the account down to the cap. An account at or over its allowance is
+- **Weekly cap** (`accounts[].weekly_cap`, `accounts[].weekly_pacing`): an
+  account with a cap may use at most `weekly_cap` of its weekly window, a flat
+  maximum. With `weekly_pacing: true` (default `false`) the allowance ramps
+  instead: `weekly_cap × (time into the week + cap_lookahead) / one week`,
+  never more than `weekly_cap`, or up to 1.0 when no `weekly_cap` is set. Early
+  in the week the allowance is small, which leaves quota for chat use outside
+  the proxy; it reaches the cap `cap_lookahead` before the weekly reset, so the
+  last evening burns the account down to the cap. An account with neither key
+  is unchanged. Upgrade note: `weekly_cap` no longer ramps on its own. A config
+  that wants the ramp adds `weekly_pacing: true` to each capped account.
+  An account at or over its allowance is
   neither usable nor reserve, and it ranks after every other account in the
   all-blocked fallback. If it is the active account it is left at once, with
   no cooldown or margin, and the switch is logged as `weekly_cap`. A manual
@@ -923,6 +929,7 @@ Based on clement-z `56ef19e`
 
 - Fixed [doxaras/claude-rotate#3](https://github.com/doxaras/claude-rotate/issues/3): the all-blocked fallback and the hold-until-reset wait rank accounts by when they can serve again, and a rejected account is never treated as usable on a stale reading.
 - Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account needed for other purposes, such as chat through the week, is not drained too quickly ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
+- Split the weekly cap from weekly pacing: `accounts[].weekly_cap` is now a flat maximum, and the per-account `weekly_pacing: true` (default `false`) ramps the allowance through the week, up to `weekly_cap` or to 1.0 when no cap is set ([18a4c3a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/18a4c3a)). Upgrade note: `weekly_cap` no longer ramps on its own; a config that wants the ramp adds `weekly_pacing: true` to each capped account.
 - `accounts[].private_to` names one or more devices that alone may use an account; within its priority tier they use it before the shared accounts. `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token` takes a comma list and writes `priority: 1` for a new account ([74d23ae](https://github.com/mrglrlgrlgrl/claude-rotate/commit/74d23ae), [3da39c2](https://github.com/mrglrlgrlgrl/claude-rotate/commit/3da39c2), [fec60f9](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fec60f9), [af3fc70](https://github.com/mrglrlgrlgrl/claude-rotate/commit/af3fc70)).
 
 **Service and deployment**
