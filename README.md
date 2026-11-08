@@ -89,7 +89,7 @@ Apple-silicon dev machine, run it on yours):
 | 50 parallel SSE streams | byte-identical relay, usage audited on every stream |
 | 50,000-row audit log | analytics rollup in **0.42 s** |
 
-Under load, the failure mode of naive rotators under load
+Under load, the failure mode of naive rotators
 is the *switch* stampede: N in-flight requests each trigger their own switch,
 the account pool burns down in seconds, and every device's prompt cache is
 thrown away N times. Here a single lock serializes the decision: one switch,
@@ -333,7 +333,7 @@ can be revoked alone.
 
 Open `http://<server>:8484/rotate/panel?key=<any device key>`:
 
-![claude-rotate analytics panel, devices, account gauges, consumption and cost-equivalent tables](screenshots/panel.png)
+![claude-rotate analytics panel: devices, account gauges, consumption and cost-equivalent tables](screenshots/panel.png)
 
 Live 5-hour and weekly gauges per account, straight from Anthropic's own
 rate-limit headers:

@@ -728,7 +728,7 @@ def pick_account(device: str | None = None) -> str | None:
     the strategy orders accounts within that.
 
     consume-first (default): burn the usable account whose weekly window resets
-    soonest, weekly quota is use-it-or-lose-it, so spend the perishable one.
+    soonest; weekly quota is use-it-or-lose-it, so spend the perishable one.
     least-used: lowest 5h utilization.
     most-weekly-left: lowest weekly utilization (most weekly quota left), among
     accounts that still have 5h session room; ties broken by lower 5h use.
@@ -1246,7 +1246,7 @@ def _tail_audit() -> None:
         identity = (stat.st_dev, stat.st_ino)
         head = f.read(64)
         # A shrunken file, or changed leading bytes, means audit.jsonl was
-        # rotated or rewritten out from under us, the cached window no
+        # rotated or rewritten out from under us; the cached window no
         # longer describes this file, so rebuild from the top. (Size alone
         # can't catch truncate-and-rewrite-bigger; the head fingerprint can.)
         if (cache.get("identity", identity) != identity

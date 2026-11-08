@@ -23,8 +23,8 @@ unless a separately configured firewall restricts every other interface.
 `panel_tailnet: true` opens the read-only dashboard and its JSON endpoints to any
 request carrying `Tailscale-User-Login`. Serve sets that header for tailnet users
 (not tagged devices, not Funnel) and strips client-supplied copies, so with the
-required loopback bind only Serve can add it, or any process on the server
-itself, which can then read the dashboard without a key. The dashboard shows
+required loopback bind only Serve can add it. Any process on the server
+itself can also send it, and so read the dashboard without a key. The dashboard shows
 account and device names, the last 4 characters of device keys and per-device
 usage; never tokens or message content. Proxy endpoints still require a device key.
 
