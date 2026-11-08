@@ -148,6 +148,50 @@ def test_sse_translation_survives_arbitrary_chunk_boundaries():
         assert tr.usage["output_tokens"] == 7 and tr.usage["input_tokens"] == 12
 
 
+def _data(obj: dict) -> str:
+    return "data: " + json.dumps(obj) + "\n\n"
+
+
+_START = {"type": "message_start",
+          "message": {"id": "msg_e", "model": "claude-sonnet-5",
+                      "usage": {"input_tokens": 5}}}
+_DELTA = {"type": "content_block_delta",
+          "delta": {"type": "text_delta", "text": "Hi"}}
+
+
+def test_upstream_error_event_becomes_error_chunk_and_bare_done():
+    tr = SseToOai()
+    err = {"type": "error", "error": {"type": "overloaded_error",
+                                      "message": "Overloaded"}}
+    got = tr.feed(_data(_START) + _data(_DELTA) + _data(err))
+    errs = [c for c in _parse_chunks(got) if "error" in c]
+    assert errs == [{"error": {"message": "Overloaded",
+                               "type": "overloaded_error"}}]
+    assert tr.tail() == "data: [DONE]\n\n"
+    assert tr.usage["input_tokens"] == 5       # still feeds the audit record
+
+
+def test_stream_ending_without_stop_reason_reports_an_error():
+    tr = SseToOai()
+    got = tr.feed(_data(_START) + _data(_DELTA))
+    tail = tr.tail()
+    assert '"finish_reason": "stop"' not in got + tail
+    chunks = _parse_chunks(tail)
+    assert chunks == [{"error": {
+        "message": "claude-rotate: upstream stream ended before message_stop",
+        "type": "api_error"}}]
+    assert tail.endswith("data: [DONE]\n\n")
+
+
+def test_normal_stream_still_ends_with_stop_and_usage():
+    tr = SseToOai()
+    tr.feed("\n".join(_events()) + "\n")
+    tail = tr.tail()
+    chunks = _parse_chunks(tail)
+    assert chunks[0]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[1]["usage"]["completion_tokens"] == 7
+
+
 if __name__ == "__main__":
     import sys as _sys
     fns = [(n, f) for n, f in sorted(globals().items())

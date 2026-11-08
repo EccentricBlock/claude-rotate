@@ -404,6 +404,8 @@ it returns `503` + `Retry-After: <seconds until an account this device may
 use can serve again>` (a window reset, or a weekly cap lifting), point a
 router's circuit breaker at that. Responses carry `x-rotate-account` and the
 upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
+A failure mid-stream, or a stream cut short, arrives as an OpenAI error chunk
+and `[DONE]`, not as a normal finish.
 
 ## Configuration (`config.json`)
 

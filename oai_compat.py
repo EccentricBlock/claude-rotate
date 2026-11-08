@@ -118,7 +118,9 @@ class SseToOai:
 
     feed() takes decoded upstream text (any chunking, so lines may split anywhere)
     and returns whatever OpenAI `data:` lines are ready; tail() emits the final
-    chunk, a usage chunk, and [DONE]. `usage` accumulates the Anthropic-style
+    chunk, a usage chunk, and [DONE]. An upstream `error` event, or a stream that
+    ends with no stop_reason, becomes an OpenAI error chunk and [DONE] instead.
+    `usage` accumulates the Anthropic-style
     usage dict across message_start/message_delta for the caller's audit record.
     """
 
@@ -129,6 +131,14 @@ class SseToOai:
         self.created = int(time.time())
         self.usage: dict = {}
         self.finish_reason: str | None = None
+        self.errored = False
+
+    @staticmethod
+    def _error_chunk(message: str, etype: str) -> str:
+        # The openai client raises APIError on a chunk with an `error` key, so a
+        # failure after the 200 status does not look like a finished answer.
+        return "data: " + json.dumps(
+            {"error": {"message": message, "type": etype}}) + "\n\n"
 
     def _chunk(self, delta: dict, finish: str | None = None) -> str:
         return "data: " + json.dumps({
@@ -170,13 +180,26 @@ class SseToOai:
                 if d.get("stop_reason"):
                     self.finish_reason = _FINISH.get(d["stop_reason"], "stop")
                 self._absorb_usage(obj.get("usage"))
+            elif t == "error":
+                e = obj.get("error") or {}
+                self.errored = True
+                out.append(self._error_chunk(
+                    str(e.get("message") or "upstream stream error"),
+                    str(e.get("type") or "api_error")))
         return "".join(out)
 
     def tail(self) -> str:
+        if self.errored:
+            return "data: [DONE]\n\n"
+        if self.finish_reason is None:
+            # No stop_reason arrived: the stream was cut, so say so.
+            return (self._error_chunk(
+                "claude-rotate: upstream stream ended before message_stop",
+                "api_error") + "data: [DONE]\n\n")
         usage_line = "data: " + json.dumps({
             "id": self.id, "object": "chat.completion.chunk",
             "created": self.created, "model": self.model,
             "choices": [], "usage": _oai_usage(self.usage),
         }) + "\n\n"
-        return (self._chunk({}, self.finish_reason or "stop")
+        return (self._chunk({}, self.finish_reason)
                 + usage_line + "data: [DONE]\n\n")
