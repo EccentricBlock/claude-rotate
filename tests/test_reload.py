@@ -197,10 +197,17 @@ check("...and the weekly snapshot waits for its first reading", "b" not in R.wee
 r = status("key-d2-bbbb")
 check("the new device key opens /rotate/status, which lists b and the config state",
       r.status_code == 200 and "b" in r.json()["accounts"] and r.json()["config"]["error"] is None)
-config(("a", "b"), switch_threshold=0.7, cap_lookahead="2d")
+config(("a", "b"), switch_threshold=0.7, pace_lookahead="2d")
 reload()
-check("a reload changing the top-level cap_lookahead applies without a restart",
-      R.CAP_LOOKAHEAD_S == 172800 and "cap_lookahead" not in R.CONFIG_STATUS["restart_needed"])
+check("a reload changing the top-level pace_lookahead applies without a restart",
+      R.PACE_LOOKAHEAD_S == 172800 and "pace_lookahead" not in R.CONFIG_STATUS["restart_needed"])
+config(("a", "b"), switch_threshold=0.7, refresh_idle_model="model-x")
+reload()
+before = R.PACE_LOOKAHEAD_S
+config(("a", "b"), switch_threshold=0.7, refresh_idle_model="model-x", cap_lookahead="12h")
+reload()
+check("a reload adding the renamed cap_lookahead keeps the running pace_lookahead and reports it",
+      R.PACE_LOOKAHEAD_S == before and "pace_lookahead" in (R.CONFIG_STATUS["error"] or ""))
 config(("a", "b"), switch_threshold=0.7, refresh_idle_model="model-x")
 reload()
 

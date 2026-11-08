@@ -95,16 +95,27 @@ def test_account_weekly_pacing_must_be_a_boolean():
         _load_with({"accounts": [acct], "devices": devices})
 
 
-def test_account_cap_lookahead_must_parse():
+def test_account_pace_lookahead_must_parse():
     devices = {"laptop": "dev-laptop-a1b2c3"}
     for value in ("12", "1.5h", "12x", "", 12, None):
         try:
-            _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
-            raise AssertionError(f"cap_lookahead {value!r} must refuse startup")
+            _load_with({"accounts": [dict(ACCT[0], pace_lookahead=value)], "devices": devices})
+            raise AssertionError(f"pace_lookahead {value!r} must refuse startup")
         except R.ConfigError as error:
-            assert "account 'a'" in str(error) and "cap_lookahead" in str(error), str(error)
+            assert "account 'a'" in str(error) and "pace_lookahead" in str(error), str(error)
     for value in ("30m", "12h", "2d"):
-        _load_with({"accounts": [dict(ACCT[0], cap_lookahead=value)], "devices": devices})
+        _load_with({"accounts": [dict(ACCT[0], pace_lookahead=value)], "devices": devices})
+
+
+def test_account_cap_lookahead_is_refused_as_renamed():
+    devices = {"laptop": "dev-laptop-a1b2c3"}
+    want = "account 'a': cap_lookahead is renamed pace_lookahead: rename the key in config.json"
+    for extra in ({"cap_lookahead": "12h"}, {"cap_lookahead": "12h", "pace_lookahead": "12h"}):
+        try:
+            _load_with({"accounts": [dict(ACCT[0], **extra)], "devices": devices})
+            raise AssertionError(f"{extra!r} must refuse startup")
+        except R.ConfigError as error:
+            assert str(error) == want, str(error)
 
 
 def test_account_private_to_must_name_registered_devices():
@@ -168,15 +179,22 @@ def test_refresh_idle_model_defaults_configures_and_must_be_a_nonempty_string():
         assert child.returncode != 0 and "refresh_idle_model" in child.stderr, (bad, child.stderr)
 
 
-def test_top_level_cap_lookahead_defaults_to_12h_and_must_parse():
-    show = "import rotator; print(rotator.CAP_LOOKAHEAD_S)"
-    for cfg, seconds in (({}, 43200), ({"cap_lookahead": "2d"}, 172800),
-                         ({"cap_lookahead": "30m"}, 1800)):
+def test_top_level_pace_lookahead_defaults_to_12h_and_must_parse():
+    show = "import rotator; print(rotator.PACE_LOOKAHEAD_S)"
+    for cfg, seconds in (({}, 43200), ({"pace_lookahead": "2d"}, 172800),
+                         ({"pace_lookahead": "30m"}, 1800)):
         child = _import_with(cfg, show)
         assert child.returncode == 0 and child.stdout.strip() == str(seconds), (cfg, child.stderr)
     for bad in ("bogus", "12", 12, None):
-        child = _import_with({"cap_lookahead": bad})
-        assert child.returncode != 0 and "cap_lookahead" in child.stderr, (bad, child.stderr)
+        child = _import_with({"pace_lookahead": bad})
+        assert child.returncode != 0 and "pace_lookahead" in child.stderr, (bad, child.stderr)
+
+
+def test_top_level_cap_lookahead_is_refused_as_renamed():
+    for cfg in ({"cap_lookahead": "12h"}, {"cap_lookahead": "12h", "pace_lookahead": "12h"}):
+        child = _import_with(cfg)
+        assert child.returncode != 0 and "cap_lookahead is renamed pace_lookahead" in child.stderr, (
+            cfg, child.stderr)
 
 
 if __name__ == "__main__":

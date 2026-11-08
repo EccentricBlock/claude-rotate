@@ -216,17 +216,17 @@ check("#3: earliest_relief skips the week-exhausted account's stale 5h reset",
 R.ACCOUNTS = saved_accts
 
 # 1l. accounts[].weekly_cap: allowance ramps up through the week, reaching
-# weekly_cap at cap_lookahead before the weekly reset and never exceeding it.
+# weekly_cap at pace_lookahead before the weekly reset and never exceeding it.
 D_ = 86400
-check("top-level cap_lookahead defaults to 12h", R.CAP_LOOKAHEAD_S == 12 * H_)
+check("top-level pace_lookahead defaults to 12h", R.PACE_LOOKAHEAD_S == 12 * H_)
 check("duration_s parses m, h and d",
       (R.duration_s("30m"), R.duration_s("12h"), R.duration_s("2d")) == (1800, 43200, 172800))
 check("duration_s rejects anything else",
       all(R.duration_s(v) is None for v in ("12", "h", "1.5h", "12x", "", " 2d", 12, None)))
-saved_accts, saved_lookahead = R.ACCOUNTS, R.CAP_LOOKAHEAD_S
+saved_accts, saved_lookahead = R.ACCOUNTS, R.PACE_LOOKAHEAD_S
 R.ACCOUNTS = {"a": {"name": "a", "weekly_cap": 0.5, "weekly_pacing": True},
               "b": {"name": "b"}}
-R.CAP_LOOKAHEAD_S = 12 * H_
+R.PACE_LOOKAHEAD_S = 12 * H_
 def cap_state(a_extra=None, b_extra=None, active="b"):
     fresh_state(active)
     R.STATE["last_switch_ts"] = time.time()  # inside the cooldown
@@ -248,22 +248,22 @@ check("cap_allowance with an unknown reset is weekly_cap", R.cap_allowance("a") 
 R.STATE["accounts"]["a"]["reset_7d"] = now - 10
 check("cap_allowance with a passed reset is weekly_cap", R.cap_allowance("a") == 0.5)
 cap_state()
-R.CAP_LOOKAHEAD_S = D_
-check("a configured top-level cap_lookahead is honoured",
+R.PACE_LOOKAHEAD_S = D_
+check("a configured top-level pace_lookahead is honoured",
       abs(R.cap_allowance("a") - 0.5 * 48 / 168) < 1e-4)
-R.ACCOUNTS["a"]["cap_lookahead"] = "2d"
-check("accounts[].cap_lookahead overrides the top-level one",
+R.ACCOUNTS["a"]["pace_lookahead"] = "2d"
+check("accounts[].pace_lookahead overrides the top-level one",
       abs(R.cap_allowance("a") - 0.5 * 72 / 168) < 1e-4)
-del R.ACCOUNTS["a"]["cap_lookahead"]
-R.CAP_LOOKAHEAD_S = 12 * H_
+del R.ACCOUNTS["a"]["pace_lookahead"]
+R.PACE_LOOKAHEAD_S = 12 * H_
 for zero in ("0m", "0h", "0d"):
-    R.ACCOUNTS["a"]["cap_lookahead"] = zero
-    check(f"accounts[].cap_lookahead {zero} means no lookahead, not the top-level 12h",
-          R.cap_lookahead_s("a") == 0
+    R.ACCOUNTS["a"]["pace_lookahead"] = zero
+    check(f"accounts[].pace_lookahead {zero} means no lookahead, not the top-level 12h",
+          R.pace_lookahead_s("a") == 0
           and abs(R.cap_allowance("a") - 0.5 * 24 / 168) < 1e-4)
-del R.ACCOUNTS["a"]["cap_lookahead"]
-check("an absent accounts[].cap_lookahead falls back to the top-level one",
-      R.cap_lookahead_s("a") == 12 * H_)
+del R.ACCOUNTS["a"]["pace_lookahead"]
+check("an absent accounts[].pace_lookahead falls back to the top-level one",
+      R.pace_lookahead_s("a") == 12 * H_)
 
 # a: 20% of the week used against an allowance of about 10.7%, so cap-blocked
 check("over its allowance: not under_threshold, hard_ok, usable or reserve_spendable",
@@ -355,12 +355,12 @@ check("paced: util_7d equal to the allowance is blocked", R.cap_allowance("a") =
       and not R.cap_ok("a"))
 R.STATE["accounts"]["a"]["util_7d"] = 0.49
 check("paced: util_7d just under the allowance is cap_ok", R.cap_ok("a"))
-R.ACCOUNTS["a"] = {"name": "a", "weekly_cap": 0.5, "cap_lookahead": "2d"}
-R.CAP_LOOKAHEAD_S = D_
+R.ACCOUNTS["a"] = {"name": "a", "weekly_cap": 0.5, "pace_lookahead": "2d"}
+R.PACE_LOOKAHEAD_S = D_
 cap_state()
-check("a flat cap ignores both cap_lookahead keys",
+check("a flat cap ignores both pace_lookahead keys",
       R.cap_allowance("a") == 0.5)
-R.CAP_LOOKAHEAD_S = 12 * H_
+R.PACE_LOOKAHEAD_S = 12 * H_
 
 # earliest_relief: dead accounts and weekly caps
 saved_bad = R.BAD_RECOVER_S
@@ -388,7 +388,7 @@ check("weekly_cap 0: no relief is known, so the fallback is now + 300",
       R.cap_relief_ts("a") == float("inf") and abs(R.earliest_relief() - (now + 300)) < 60)
 
 R.ACCOUNTS = {"a": {"name": "a", "weekly_cap": 0.5, "weekly_pacing": True}}
-R.CAP_LOOKAHEAD_S = 12 * H_
+R.PACE_LOOKAHEAD_S = 12 * H_
 fresh_state("a")
 R.STATE["accounts"] = {"a": {"util_5h": 0.1, "util_7d": 0.2, "reset_5h": now + 3600,
                              "reset_7d": now + 6 * D_}}
@@ -408,7 +408,7 @@ check("capped and spent, 5h reset later than the cap lifts: takes the 5h reset",
 R.STATE["accounts"]["a"]["reset_5h"] = now + 3600
 check("capped and spent, 5h reset sooner than the cap lifts: takes the cap relief",
       abs(R.earliest_relief() - cap_lifts) < 60)
-R.ACCOUNTS, R.CAP_LOOKAHEAD_S = saved_accts, saved_lookahead
+R.ACCOUNTS, R.PACE_LOOKAHEAD_S = saved_accts, saved_lookahead
 
 # 2. burst 429 (util well under 1.0, no rejected status) → pace, no rotation
 fresh_state("a")

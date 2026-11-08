@@ -135,8 +135,10 @@ def load_config() -> tuple[dict, tuple]:
             raise ConfigError(f"account '{acct['name']}': weekly_cap must be a number from 0 to 1")
         if "weekly_pacing" in acct and type(acct["weekly_pacing"]) is not bool:
             raise ConfigError(f"account '{acct['name']}': weekly_pacing must be true or false")
-        if "cap_lookahead" in acct and duration_s(acct["cap_lookahead"]) is None:
-            raise ConfigError(f"account '{acct['name']}': cap_lookahead must be an integer and "
+        if "cap_lookahead" in acct:
+            raise ConfigError(f"account '{acct['name']}': cap_lookahead is renamed pace_lookahead: rename the key in config.json")
+        if "pace_lookahead" in acct and duration_s(acct["pace_lookahead"]) is None:
+            raise ConfigError(f"account '{acct['name']}': pace_lookahead must be an integer and "
                              "one unit m, h or d, for example \"12h\"")
         path = token_path(acct)
         files.append((path, file_stamp(path)))
@@ -221,9 +223,11 @@ def settings(cfg: dict) -> dict:
     if panel_tailnet and bind not in LOOPBACK:
         raise ConfigError("panel_tailnet needs bind 127.0.0.1 behind Tailscale Serve: on any other "
                           "address a client could send Tailscale-User-Login itself and skip the key")
-    cap_lookahead = duration_s(cfg.get("cap_lookahead", "12h"))
-    if cap_lookahead is None:
-        raise ConfigError("cap_lookahead must be an integer and one unit m, h or d, for example \"12h\"")
+    if "cap_lookahead" in cfg:
+        raise ConfigError("cap_lookahead is renamed pace_lookahead: rename the key in config.json")
+    pace_lookahead = duration_s(cfg.get("pace_lookahead", "12h"))
+    if pace_lookahead is None:
+        raise ConfigError("pace_lookahead must be an integer and one unit m, h or d, for example \"12h\"")
     model = cfg.get("refresh_idle_model", "claude-haiku-4-5")
     if not isinstance(model, str) or not model.strip():
         raise ConfigError("refresh_idle_model must be a nonempty model name string")
@@ -262,7 +266,7 @@ def settings(cfg: dict) -> dict:
         "HOLD_MAX_S": cfg.get("hold_max_s", 0),  # 0 = return 429 when every account is spent
         "REFRESH_IDLE_S": resource_limit(cfg, "refresh_idle_s", 1800, allow_zero=True),  # 0 = off
         "PANEL_TAILNET": panel_tailnet,
-        "CAP_LOOKAHEAD_S": cap_lookahead,
+        "PACE_LOOKAHEAD_S": pace_lookahead,
         "REFRESH_IDLE_MODEL": model,
         # Cheapest call that returns the unified headers on a setup-token: /api/oauth/usage
         # needs the user:profile scope and count_tokens omits them. A model the plan
@@ -470,11 +474,11 @@ def weight(name: str) -> float:
     return ACCOUNTS[name].get("weight", 1)
 
 
-def cap_lookahead_s(name: str) -> float:
-    """Pacing lookahead in seconds: the account's cap_lookahead, where "0m"
+def pace_lookahead_s(name: str) -> float:
+    """Pacing lookahead in seconds: the account's pace_lookahead, where "0m"
     means none, else the top-level one when the account sets none."""
-    own = duration_s(ACCOUNTS[name].get("cap_lookahead"))
-    return CAP_LOOKAHEAD_S if own is None else own
+    own = duration_s(ACCOUNTS[name].get("pace_lookahead"))
+    return PACE_LOOKAHEAD_S if own is None else own
 
 
 def cap_allowance(name: str) -> float:
@@ -487,7 +491,7 @@ def cap_allowance(name: str) -> float:
     reset, now = STATE["accounts"].get(name, {}).get("reset_7d"), time.time()
     if not ACCOUNTS[name].get("weekly_pacing") or not reset or now >= reset:
         return cap
-    lookahead = cap_lookahead_s(name)
+    lookahead = pace_lookahead_s(name)
     return cap * min(max((now + lookahead - (reset - 604800)) / 604800, 0.0), 1.0)
 
 
@@ -691,7 +695,7 @@ def cap_relief_ts(name: str) -> float:
     used = util_7d(name)
     if not ACCOUNTS[name].get("weekly_pacing") or used >= cap:
         return reset
-    lifts = reset - 604800 - cap_lookahead_s(name) + used * 604800 / cap
+    lifts = reset - 604800 - pace_lookahead_s(name) + used * 604800 / cap
     return min(max(lifts, now), reset)
 
 
