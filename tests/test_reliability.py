@@ -52,6 +52,21 @@ class StorageTests(unittest.TestCase):
         self.assertFalse(result.get('history_limited', False))
         self.assertEqual(R.aggregate_audit()['by_device']['test']['requests'], 2)
 
+    def test_first_file_after_a_missing_one_is_not_partial(self):
+        self.assertFalse(R.aggregate_audit().get('history_limited', False))
+        self.write([self.row(0)])
+        result = R.aggregate_audit()
+        self.assertFalse(result.get('history_limited', False))
+        self.assertEqual(result['by_device']['test']['requests'], 1)
+
+    def test_file_read_then_deleted_still_marks_partial(self):
+        self.write([self.row(0)])
+        R.aggregate_audit()
+        R.AUDIT_PATH.unlink()
+        R.aggregate_audit()
+        self.write([self.row(1)])
+        self.assertTrue(R.aggregate_audit()['history_limited'])
+
     def test_cache_caps_history_and_reports_partial_totals(self):
         self.write([self.row(i) for i in range(12)])
         result = R.aggregate_audit()

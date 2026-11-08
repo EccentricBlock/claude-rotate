@@ -1236,7 +1236,7 @@ def _tail_audit() -> None:
         cache["offset"] = 0
         cache["sig"] = b""
         cache["bytes"] = 0
-        cache["identity"] = None
+        cache.pop("identity", None)  # a first file is not a rotation
         cache["records"].clear()
         return
     day_ago = now - 86400
