@@ -256,6 +256,14 @@ check("accounts[].cap_lookahead overrides the top-level one",
       abs(R.cap_allowance("a") - 0.5 * 72 / 168) < 1e-4)
 del R.ACCOUNTS["a"]["cap_lookahead"]
 R.CAP_LOOKAHEAD_S = 12 * H_
+for zero in ("0m", "0h", "0d"):
+    R.ACCOUNTS["a"]["cap_lookahead"] = zero
+    check(f"accounts[].cap_lookahead {zero} means no lookahead, not the top-level 12h",
+          R.cap_lookahead_s("a") == 0
+          and abs(R.cap_allowance("a") - 0.5 * 24 / 168) < 1e-4)
+del R.ACCOUNTS["a"]["cap_lookahead"]
+check("an absent accounts[].cap_lookahead falls back to the top-level one",
+      R.cap_lookahead_s("a") == 12 * H_)
 
 # a: 20% of the week used against an allowance of about 10.7%, so cap-blocked
 check("over its allowance: not under_threshold, hard_ok, usable or reserve_spendable",
@@ -331,6 +339,28 @@ check("pacing with no cap: under the allowance is cap_ok", R.cap_ok("a"))
 R.ACCOUNTS["a"] = {"name": "a"}
 cap_state({"util_7d": 0.9})
 check("neither weekly_cap nor weekly_pacing: cap_ok at util_7d 0.9", R.cap_ok("a"))
+
+# edge branches of the allowance and cap_ok
+for pacing in (False, True):
+    R.ACCOUNTS["a"] = {"name": "a", "weekly_cap": 0, "weekly_pacing": pacing}
+    cap_state({"util_7d": 0.0})
+    check(f"weekly_cap 0 (pacing {pacing}): allowance 0, never cap_ok",
+          R.cap_allowance("a") == 0 and not R.cap_ok("a"))
+R.ACCOUNTS["a"] = {"name": "a", "weekly_cap": 0.5, "weekly_pacing": True}
+cap_state({"util_7d": 0.0, "reset_7d": now + 8 * D_})
+check("paced, reset more than a week plus the lookahead away: allowance clamps to 0",
+      R.cap_allowance("a") == 0.0 and not R.cap_ok("a"))
+cap_state({"util_7d": 0.5, "reset_7d": now + 6 * H_})
+check("paced: util_7d equal to the allowance is blocked", R.cap_allowance("a") == 0.5
+      and not R.cap_ok("a"))
+R.STATE["accounts"]["a"]["util_7d"] = 0.49
+check("paced: util_7d just under the allowance is cap_ok", R.cap_ok("a"))
+R.ACCOUNTS["a"] = {"name": "a", "weekly_cap": 0.5, "cap_lookahead": "2d"}
+R.CAP_LOOKAHEAD_S = D_
+cap_state()
+check("a flat cap ignores both cap_lookahead keys",
+      R.cap_allowance("a") == 0.5)
+R.CAP_LOOKAHEAD_S = 12 * H_
 R.ACCOUNTS, R.CAP_LOOKAHEAD_S = saved_accts, saved_lookahead
 
 # 2. burst 429 (util well under 1.0, no rejected status) → pace, no rotation

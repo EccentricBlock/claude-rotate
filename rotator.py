@@ -470,6 +470,13 @@ def weight(name: str) -> float:
     return ACCOUNTS[name].get("weight", 1)
 
 
+def cap_lookahead_s(name: str) -> float:
+    """Pacing lookahead in seconds: the account's cap_lookahead, where "0m"
+    means none, else the top-level one when the account sets none."""
+    own = duration_s(ACCOUNTS[name].get("cap_lookahead"))
+    return CAP_LOOKAHEAD_S if own is None else own
+
+
 def cap_allowance(name: str) -> float:
     """Weekly use an account may reach now. Without weekly_pacing this is
     weekly_cap, flat. With it, weekly_cap (1.0 when unset) scaled by how much
@@ -480,7 +487,7 @@ def cap_allowance(name: str) -> float:
     reset, now = STATE["accounts"].get(name, {}).get("reset_7d"), time.time()
     if not ACCOUNTS[name].get("weekly_pacing") or not reset or now >= reset:
         return cap
-    lookahead = duration_s(ACCOUNTS[name].get("cap_lookahead")) or CAP_LOOKAHEAD_S
+    lookahead = cap_lookahead_s(name)
     return cap * min(max((now + lookahead - (reset - 604800)) / 604800, 0.0), 1.0)
 
 

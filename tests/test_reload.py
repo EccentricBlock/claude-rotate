@@ -197,6 +197,12 @@ check("...and the weekly snapshot waits for its first reading", "b" not in R.wee
 r = status("key-d2-bbbb")
 check("the new device key opens /rotate/status, which lists b and the config state",
       r.status_code == 200 and "b" in r.json()["accounts"] and r.json()["config"]["error"] is None)
+config(("a", "b"), switch_threshold=0.7, cap_lookahead="2d")
+reload()
+check("a reload changing the top-level cap_lookahead applies without a restart",
+      R.CAP_LOOKAHEAD_S == 172800 and "cap_lookahead" not in R.CONFIG_STATUS["restart_needed"])
+config(("a", "b"), switch_threshold=0.7, refresh_idle_model="model-x")
+reload()
 
 # --- an invalid reload keeps the running config -------------------------------
 accts, devs = R.ACCOUNTS, R.DEVICE_BY_KEY
