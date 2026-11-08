@@ -12,9 +12,10 @@ rate-limit window, with a built-in analytics panel showing quota gauges,
 per-device consumption, and cost-equivalent dollars.
 
 > **Fork lineage:** this repository is a fork of
-> [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate), which is
-> itself a fork of the original work at
-> [doxaras/claude-rotate](https://github.com/doxaras/claude-rotate).
+> [doxaras/claude-rotate](https://github.com/doxaras/claude-rotate), the
+> original, and includes the changes of
+> [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate) by
+> Clément Zrounba up to `56ef19e`.
 > See [Fork changes](#fork-changes) for what each fork added.
 
 One process, one config file, no database. Built for individual developers who
@@ -848,15 +849,17 @@ commercial or shared, use the API with metered billing instead.
 
 ## Fork changes
 
-Changes made in each fork since it diverged from its parent. Newest fork first.
+This section lists this fork's changes since doxaras `19529c6`, including
+those taken from other forks.
 
 ### mrglrlgrlgrl/claude-rotate (this repo)
 
-Based on clement-z `56ef19e`
-([compare](https://github.com/mrglrlgrlgrl/claude-rotate/compare/56ef19e...main)).
+Based on doxaras `19529c6`
+([compare](https://github.com/mrglrlgrlgrl/claude-rotate/compare/19529c6...main)).
 
 **Merged from other forks**
 
+- Built on [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate) by Clément Zrounba up to `56ef19e`, 16 commits, authorship preserved ([compare](https://github.com/clement-z/claude-rotate/compare/19529c6...56ef19e)). Its changes are listed in the groups below, marked `clement-z:`.
 - Merged [doxaras/claude-rotate#4](https://github.com/doxaras/claude-rotate/pull/4) (by Dave Marsden, 9 commits, authorship preserved): `most-weekly-left` and `weekly-pace` rotation strategies, a reserve band above the switch thresholds, and rotation off closed/free accounts (403/404 on `/v1/messages`) with backoff recovery.
 - Took private accounts from kamal/claude-rotate with authorship preserved, leaving out its admin dashboard and join page: `private_to` with per-device rotation pointers, and `--private-to` on `setup.sh add-account` ([kamal 98c5520](https://github.com/kamal/claude-rotate/commit/98c5520), [kamal ca5d02b](https://github.com/kamal/claude-rotate/commit/ca5d02b)).
 
@@ -874,48 +877,27 @@ Based on clement-z `56ef19e`
 - Added `CLAUDE_ROTATE_BIND`, which overrides `bind` ([35f4624](https://github.com/mrglrlgrlgrl/claude-rotate/commit/35f4624)).
 - Added a Docker image and compose example, published to GHCR for amd64 and arm64 ([fdcff28](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fdcff28), [35da23e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/35da23e)).
 - Changed publishing: a push to `main` publishes only `edge` and `sha-<short>`, and a `vX.Y.Z` tag publishes `X.Y.Z`, `X.Y` and `latest`, skipping the test matrix when `main` already built that commit green ([ffd6acc](https://github.com/mrglrlgrlgrl/claude-rotate/commit/ffd6acc)).
+- clement-z: Harden credential boundaries, dashboard rendering and request handling; `SECURITY.md` added ([e19d5b3](https://github.com/clement-z/claude-rotate/commit/e19d5b3)).
+- clement-z: Harden the Debian systemd service and bound resource use on small VPSes ([89ec74a](https://github.com/clement-z/claude-rotate/commit/89ec74a)).
+- clement-z: Let tailnet users open the panel without a device key via `panel_tailnet` (loopback bind only) ([de813a1](https://github.com/clement-z/claude-rotate/commit/de813a1)).
+- clement-z: Managed installer/uninstaller (`install.sh`, `uninstall.sh`) and `claude-rotate-admin` for local account/device administration ([fbf026f](https://github.com/clement-z/claude-rotate/commit/fbf026f)).
+- clement-z: `OPERATIONS.md` documenting routine service operations ([d5c4d6b](https://github.com/clement-z/claude-rotate/commit/d5c4d6b)).
 
 **Usage tracking**
 
 - Made the idle refresh's probe model configurable with `refresh_idle_model`, and documented the refresh's daily cost per idle account ([05f1c6e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/05f1c6e)).
+- clement-z: Refresh idle accounts' usage every `refresh_idle_s` with a 1-token request ([969ed52](https://github.com/clement-z/claude-rotate/commit/969ed52)).
+- clement-z: Keep 7-day, 30-day and all-time totals per device and model in `device_usage.json` ([4b89abb](https://github.com/clement-z/claude-rotate/commit/4b89abb)).
 
 **Panel**
 
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
 - Showed each account's weekly cap or paced allowance as a badge in the panel, and added `weekly_cap`, `weekly_pacing` and `weekly_allowance` to `/rotate/status` ([32b5221](https://github.com/mrglrlgrlgrl/claude-rotate/commit/32b5221)).
-
-### clement-z/claude-rotate
-
-Based on doxaras `19529c6`
-([compare](https://github.com/clement-z/claude-rotate/compare/19529c6...56ef19e)).
-16 commits, 2026-10-24 → 2026-11-06.
-
-**Security & service hardening**
-
-- Harden credential boundaries, dashboard rendering and request handling; `SECURITY.md` added ([e19d5b3](https://github.com/clement-z/claude-rotate/commit/e19d5b3)).
-- Harden the Debian systemd service and bound resource use on small VPSes ([89ec74a](https://github.com/clement-z/claude-rotate/commit/89ec74a)).
-- Let tailnet users open the panel without a device key via `panel_tailnet` (loopback bind only) ([de813a1](https://github.com/clement-z/claude-rotate/commit/de813a1)).
-
-**Install & administration**
-
-- Managed installer/uninstaller (`install.sh`, `uninstall.sh`) and `claude-rotate-admin` for local account/device administration ([fbf026f](https://github.com/clement-z/claude-rotate/commit/fbf026f)).
-- `OPERATIONS.md` documenting routine service operations ([d5c4d6b](https://github.com/clement-z/claude-rotate/commit/d5c4d6b)).
-
-**Usage tracking**
-
-- Refresh idle accounts' usage every `refresh_idle_s` with a 1-token request ([969ed52](https://github.com/clement-z/claude-rotate/commit/969ed52)).
-- Keep 7-day, 30-day and all-time totals per device and model in `device_usage.json` ([4b89abb](https://github.com/clement-z/claude-rotate/commit/4b89abb)).
-
-**Weekly quota chart & forecast**
-
-- Chart weekly quota across accounts and estimate when it runs out; `accounts[].weight` for mixed plan sizes ([206e956](https://github.com/clement-z/claude-rotate/commit/206e956), [9cc2167](https://github.com/clement-z/claude-rotate/commit/9cc2167)).
-- Project 7 days ahead through shortfalls, shade periods at the limit, and measure the rate only over time with quota left ([c625633](https://github.com/clement-z/claude-rotate/commit/c625633), [5047e8d](https://github.com/clement-z/claude-rotate/commit/5047e8d), [0d8493e](https://github.com/clement-z/claude-rotate/commit/0d8493e)).
-- Plot summed weekly usage against capacity, dropping at each reset; scrollable history around now ([a02cebb](https://github.com/clement-z/claude-rotate/commit/a02cebb), [56ef19e](https://github.com/clement-z/claude-rotate/commit/56ef19e)).
-
-**Panel**
-
-- Redesign: run-out headline, tiles, meters, per-device 24 h / 7 d / 30 d / all-time usage ([948691e](https://github.com/clement-z/claude-rotate/commit/948691e)).
-- Phone layout and tooltip position fix ([277cdb8](https://github.com/clement-z/claude-rotate/commit/277cdb8)).
+- clement-z: Chart weekly quota across accounts and estimate when it runs out; `accounts[].weight` for mixed plan sizes ([206e956](https://github.com/clement-z/claude-rotate/commit/206e956), [9cc2167](https://github.com/clement-z/claude-rotate/commit/9cc2167)).
+- clement-z: Project 7 days ahead through shortfalls, shade periods at the limit, and measure the rate only over time with quota left ([c625633](https://github.com/clement-z/claude-rotate/commit/c625633), [5047e8d](https://github.com/clement-z/claude-rotate/commit/5047e8d), [0d8493e](https://github.com/clement-z/claude-rotate/commit/0d8493e)).
+- clement-z: Plot summed weekly usage against capacity, dropping at each reset; scrollable history around now ([a02cebb](https://github.com/clement-z/claude-rotate/commit/a02cebb), [56ef19e](https://github.com/clement-z/claude-rotate/commit/56ef19e)).
+- clement-z: Redesign: run-out headline, tiles, meters, per-device 24 h / 7 d / 30 d / all-time usage ([948691e](https://github.com/clement-z/claude-rotate/commit/948691e)).
+- clement-z: Phone layout and tooltip position fix ([277cdb8](https://github.com/clement-z/claude-rotate/commit/277cdb8)).
 
 ## License
 
@@ -923,6 +905,6 @@ Based on doxaras `19529c6`
 this README is part of the deal: this software is for rotating accounts *you*
 own and pay for, at your own risk.
 
-This repository is a fork of [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate),
-itself a fork of the original [doxaras/claude-rotate](https://github.com/doxaras/claude-rotate);
-the original copyright notice is retained in [LICENSE](LICENSE).
+This repository is a fork of [doxaras/claude-rotate](https://github.com/doxaras/claude-rotate)
+and includes changes from [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate).
+The original copyright notice is retained in [LICENSE](LICENSE).
