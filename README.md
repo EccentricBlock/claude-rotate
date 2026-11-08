@@ -331,7 +331,9 @@ can be revoked alone.
 
 ## Analytics panel
 
-Open `http://<server>:8484/rotate/panel?key=<any device key>`:
+Open `http://<server>:8484/rotate/panel?key=<any device key>`. The page keeps
+the key in the tab's session storage and removes it from the address bar, so a
+reload works. Open the link once per browser tab:
 
 ![claude-rotate analytics panel: devices, account gauges, consumption and cost-equivalent tables](screenshots/panel.png)
 
@@ -705,7 +707,9 @@ VS Code from a shell that has them exported (or set them user-wide) so the
 extension inherits them.
 
 **Panel is empty or unauthorized.** The panel needs
-`?key=<any device key>` in the URL; consumption tables build from
+`?key=<any device key>` in the URL once per browser tab. Without a valid key
+it shows one banner, "No device key: open the panel link with ?key=<device
+key>", and nothing else. Consumption tables build from
 `logs/audit.jsonl` and only show the last 24h, so a fresh install shows
 zeros until traffic flows.
 

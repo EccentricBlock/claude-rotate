@@ -53,9 +53,10 @@ private state/log directories, but cannot modify installed code or credentials.
 - Use the `Authorization: Bearer ...` header for API calls. Query-string keys
   remain supported for initial dashboard links, but can appear in the first
   request's access logs and in copied links. Disable or redact query logging in
-  any front-end proxy. The dashboard removes its key from the address bar and
-  uses headers for polling; reopening the original link is required after a
-  manual reload. Private responses use `no-store` and `no-referrer`.
+  any front-end proxy. The dashboard moves its key from the address bar into
+  the tab's `sessionStorage` and uses headers for polling, so a reload works
+  and closing the tab forgets the key. The page loads without a key, but its
+  JSON endpoints need one. Private responses use `no-store` and `no-referrer`.
 - The transparent proxy removes local query keys, browser cookies/referrers,
   and Tailscale/forwarding identity headers before contacting Anthropic. It
   still forwards ordinary API headers and permits all upstream paths/methods.

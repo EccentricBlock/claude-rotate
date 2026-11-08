@@ -24,10 +24,19 @@ const elements = {}, urls = [], replaced = [];
 const usage = {requests:1,input_tokens:1,output_tokens:1,cache_read:0,cache_write:0,cost_usd:0};
 const stats = {devices:{[value]:{last_model:value,last_account:value,key_suffix:value}},alerts:[{level:'warn',text:value}],by_device:{[value]:usage},by_model:{[value]:usage},by_account:{[value]:usage},periods:{since:value,'7d':{device:{[value]:usage},model:{[value]:usage}},'30d':{device:{[value]:usage},model:{[value]:usage}},all:{device:{[value]:usage,[value+'-gone']:usage},model:{[value]:usage}},trend:{[value]:[0,1,2]}}};
 const status = {accounts:{[value]:{priority:100,private_to:[value,value+"-2"],reset_5h:1793883600,reset_7d:1793883600,reset_5h_in_min:30,reset_7d_in_h:50}},active_account:value,strategy:value,switch_threshold:.8,switch_threshold_7d:.98,recent_events:[{ts:value,from:value,to:value,reason:value}],weekly:{series:[[0,0,100],[3600,10,100]],projection:[[3600,10,100],[7200,100,100]],rate_per_day:5,eta:7200,back:9000,back_account:value,capacity:200}};
-const context = vm.createContext({URL,URLSearchParams,location:{search:'?key=fake-viewer-key',href:'http://proxy/rotate/panel?key=fake-viewer-key'},history:{replaceState:(_a,_b,url)=>replaced.push(url)},document:{getElementById:id=>elements[id]??=( {innerHTML:'',textContent:''} )},setInterval:()=>{},fetch:async(url,opts)=>{urls.push({url,opts});return {json:async()=>url.includes('/status')?status:stats}}});
+const makeStorage=(init)=>{const m=new Map(Object.entries(init||{}));return {m,getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>{m.set(k,String(v))},removeItem:k=>{m.delete(k)}}};
+const makeContext=(search,storage,code)=>{
+  const els={}, calls=[], repl=[];
+  const ctx=vm.createContext({URL,URLSearchParams,location:{search,href:'http://proxy/rotate/panel'+search},history:{replaceState:(_a,_b,url)=>repl.push(url)},sessionStorage:storage,document:{getElementById:id=>els[id]??=( {innerHTML:'',textContent:''} )},setInterval:()=>{},fetch:async(url,opts)=>{calls.push({url,opts});return {status:code,json:async()=>url.includes('/status')?status:stats}}});
+  return {ctx,els,calls,repl};
+};
+const boot=async(search,storage,code=200)=>{const c=makeContext(search,storage,code);vm.runInContext(script,c.ctx,{timeout:1000});await vm.runInContext('refresh()',c.ctx,{timeout:1000});return c};
+const bearers=c=>c.calls.map(({opts})=>opts.headers.Authorization);
+const context = vm.createContext({URL,URLSearchParams,location:{search:'?key=fake-viewer-key',href:'http://proxy/rotate/panel?key=fake-viewer-key'},history:{replaceState:(_a,_b,url)=>replaced.push(url)},sessionStorage:makeStorage(),document:{getElementById:id=>elements[id]??=( {innerHTML:'',textContent:''} )},setInterval:()=>{},fetch:async(url,opts)=>{urls.push({url,opts});return {json:async()=>url.includes('/status')?status:stats}}});
 (async()=>{
   vm.runInContext(script,context,{timeout:1000});
   await vm.runInContext('refresh()',context,{timeout:1000});
+  assert.equal(context.sessionStorage.getItem('claude-rotate-key'),'fake-viewer-key','first load must store the key');
   assert(replaced.every(url=>!url.includes('key=')));
   assert(urls.every(({url,opts})=>!url.includes('key=')&&opts.headers.Authorization==='Bearer fake-viewer-key'));
   assert(elements.weekly.innerHTML.includes('class="hit"'),'shortfall band not drawn');
@@ -50,6 +59,26 @@ const context = vm.createContext({URL,URLSearchParams,location:{search:'?key=fak
   assert(html.includes('paced 11% now of 50% · reached'),'reached marker missing');
   html=await acct({weekly_cap:null,weekly_pacing:false,weekly_allowance:null,effective_util_7d:.2});
   assert(!html.includes('weekly cap') && !html.includes('paced'),'badge shown without cap or pacing');
+  // reload: a fresh context, the stub carried over, no ?key= in the URL
+  let reload=await boot('',context.sessionStorage);
+  assert(bearers(reload).length>=2 && bearers(reload).every(b=>b==='Bearer fake-viewer-key'),'reload must send the stored key');
+  // a pre-filled stub with no ?key=
+  let pre=await boot('',makeStorage({'claude-rotate-key':'stored-key'}));
+  assert(bearers(pre).every(b=>b==='Bearer stored-key'),'stored key not sent');
+  // the URL wins over the stored key, and replaces it
+  const over=makeStorage({'claude-rotate-key':'stored-key'});
+  let win=await boot('?key=new-key',over);
+  assert(bearers(win).every(b=>b==='Bearer new-key') && over.getItem('claude-rotate-key')==='new-key','URL key must win and be stored');
+  // no key anywhere and a 401: one banner, the stored key forgotten, nothing thrown
+  const none=makeStorage({'claude-rotate-key':'stale-key'});
+  let bad=await boot('',none,401);
+  assert(bad.els.alerts.innerHTML.includes('open the panel link with ?key='),'401 banner missing');
+  assert.equal(none.getItem('claude-rotate-key'),null,'401 must forget the stored key');
+  assert(bad.els.pills===undefined || bad.els.pills.innerHTML==='','401 must render nothing else');
+  // blocked storage: the URL key still works
+  const blocked={getItem(){throw new Error('blocked')},setItem(){throw new Error('blocked')},removeItem(){throw new Error('blocked')}};
+  let blk=await boot('?key=url-key',blocked);
+  assert(bearers(blk).every(b=>b==='Bearer url-key'),'blocked storage must fall back to the URL key');
   console.log('panel JavaScript security checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''

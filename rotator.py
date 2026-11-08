@@ -1576,7 +1576,10 @@ PANEL_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <p class="muted small">Cost-equivalent = API list prices (cache read 0.1&times;, write 1.25&times;); actual spend is covered by the subscriptions.</p>
 </main>
 <script>
-const KEY = new URLSearchParams(location.search).get('key');
+const SKEY = 'claude-rotate-key';
+let KEY = new URLSearchParams(location.search).get('key');
+if (KEY) { try { sessionStorage.setItem(SKEY, KEY) } catch (e) {} }
+else { try { KEY = sessionStorage.getItem(SKEY) } catch (e) {} }
 const cleanURL = new URL(location.href);
 cleanURL.searchParams.delete('key');
 history.replaceState(null, '', cleanURL.pathname + cleanURL.search + cleanURL.hash);
@@ -1651,10 +1654,14 @@ $('weekly').onpointerleave=e=>{if(e.pointerType==='touch') return;  // touch fir
   $('tip').style.display='none'; const xh=document.querySelector('#xh'); if(xh) xh.setAttribute('opacity','0')};
 $('tbl').onclick=()=>{showTable=!showTable; $('tbl').textContent=showTable?'Chart':'Table'; refresh()};
 $('period').onclick=e=>{const p=e.target.dataset&&e.target.dataset.p; if(p){period=p; refresh()}};
+const api=path=>fetch(path,{headers:KEY?{Authorization:'Bearer '+KEY}:{},cache:'no-store'});
 async function refresh(){
-  const [st, stats] = await Promise.all([
-    fetch('/rotate/status',{headers:KEY?{Authorization:'Bearer '+KEY}:{},cache:'no-store'}).then(r=>r.json()),
-    fetch('/rotate/stats',{headers:KEY?{Authorization:'Bearer '+KEY}:{},cache:'no-store'}).then(r=>r.json())]);
+  const [sr, tr] = await Promise.all([api('/rotate/status'), api('/rotate/stats')]);
+  if(sr.status===401){
+    KEY=null; try{sessionStorage.removeItem(SKEY)}catch(e){}
+    $('alerts').innerHTML='<div class="banner warn">&#9888; <span>No device key: open the panel link with ?key=&lt;device key&gt;</span></div>';
+    return}
+  const [st, stats] = await Promise.all([sr.json(), tr.json()]);
   const per=stats.periods||{}, wk=st.weekly||{}, accts=Object.entries(st.accounts||{});
   $('host').textContent=location.host||'';
   $('pills').innerHTML=`<span class="pill"><span class="dot" style="background:var(--good)"></span>active: ${esc(st.active_account)}</span> <span class="pill">${esc(st.strategy)} &middot; ${accts.length} accounts &middot; ${Object.keys(stats.devices||{}).length} devices</span>`;
@@ -1704,9 +1711,7 @@ refresh(); setInterval(refresh, 10000);
 
 @app.get("/rotate/panel")
 async def rotate_panel(request: Request):
-    if not panel_allowed(request):
-        return JSONResponse({"error": "unknown device key — open /rotate/panel?key=<device key>"},
-                            status_code=401)
+    # The page is static and holds no account data; its JSON endpoints check the key.
     return Response(content=PANEL_HTML, media_type="text/html")
 
 

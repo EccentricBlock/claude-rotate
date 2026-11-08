@@ -321,6 +321,12 @@ check("stats returns rollups", r.status_code == 200 and "by_device" in r.json()
       and set(r.json()["periods"]) == {"since", "7d", "30d", "all", "trend"})
 r = call(path="/rotate/panel?key=devkey-1", key=None, method="GET")
 check("panel serves html", r.status_code == 200 and "text/html" in r.headers["content-type"])
+r = call(path="/rotate/panel", key=None, method="GET")
+check("keyless panel page (a reload) serves private html",
+      r.status_code == 200 and "text/html" in r.headers["content-type"]
+      and r.headers["cache-control"] == "no-store" and r.headers["referrer-policy"] == "no-referrer")
+for p in ("/rotate/status", "/rotate/stats"):
+    check(f"keyless {p} is still refused", call(path=p, key=None, method="GET").status_code == 401)
 
 # --- 9. idle-account usage refresh -------------------------------------------
 fresh_state(active="a", accounts={"a": {"last_seen": time.time()},
