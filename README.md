@@ -396,7 +396,7 @@ curl http://<server>:8484/v1/chat/completions \
        "messages":[{"role":"user","content":"hello"}]}'
 ```
 
-Text conversations only (tool use → 400). When every account's window is spent
+Text conversations only (tool use or a non-text content part → 400). When every account's window is spent
 it returns `503` + `Retry-After: <seconds until an account this device may
 use can serve again>` (a window reset, or a weekly cap lifting) — point a
 router's circuit breaker at that. Responses carry `x-rotate-account` and the

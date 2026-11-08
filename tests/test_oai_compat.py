@@ -61,6 +61,21 @@ def test_tools_and_unknown_roles_are_refused_not_mistranslated():
     assert err
 
 
+def test_non_text_content_and_tool_calls_are_refused_not_dropped():
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+    for content in ([image, {"type": "text", "text": "what is this?"}], [image]):
+        body, err = oai_to_anthropic({"messages": [{"role": "user", "content": content}]})
+        assert body is None and "'image_url'" in err and "text only" in err
+    body, err = oai_to_anthropic({"messages": [{"role": "user", "content": ["hi"]}]})
+    assert body is None and err == "each content part must be an object"
+    for key, value in (("tool_calls", [{"id": "c1", "type": "function"}]),
+                       ("function_call", {"name": "f", "arguments": "{}"})):
+        body, err = oai_to_anthropic({"messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, key: value}]})
+        assert body is None and "tool calls" in err
+
+
 def test_response_translation_and_finish_reasons():
     msg = {"id": "msg_01", "model": "claude-sonnet-5", "stop_reason": "max_tokens",
            "content": [{"type": "text", "text": "hello "},

@@ -50,9 +50,16 @@ def oai_to_anthropic(oai: dict) -> tuple[dict | None, str | None]:
         if not isinstance(m, dict):
             return None, "each messages[] entry must be an object"
         role, content = m.get("role"), m.get("content")
+        if m.get("tool_calls") or m.get("function_call"):
+            return None, "tool calls are not supported by this endpoint yet"
         if isinstance(content, list):        # OpenAI content-part arrays
-            text_parts = [p.get("text", "") for p in content
-                          if isinstance(p, dict) and p.get("type") == "text"]
+            for p in content:
+                if not isinstance(p, dict):
+                    return None, "each content part must be an object"
+                if p.get("type") != "text":
+                    return None, (f"unsupported content part type: {p.get('type')!r}; "
+                                  "this endpoint takes text only")
+            text_parts = [p.get("text", "") for p in content]
             if any(not isinstance(text, str) for text in text_parts):
                 return None, "text content parts must contain strings"
             content = "".join(text_parts)

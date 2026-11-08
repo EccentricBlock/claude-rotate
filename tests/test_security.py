@@ -62,6 +62,16 @@ async def main():
                 assert response.status_code == 400, (body, response.status_code)
                 assert len(sent) == before
 
+            before = len(sent)
+            image = {"messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                {"type": "text", "text": "what is this?"}]}]}
+            response = await client.post("/v1/chat/completions", headers=auth, json=image)
+            assert response.status_code == 400
+            assert response.json()["error"]["type"] == "invalid_request_error"
+            assert "image_url" in response.json()["error"]["message"]
+            assert len(sent) == before
+
             r.DEVICE_BY_KEY[""] = "must-never-authenticate"
             before = len(sent)
             assert (await client.get("/v1/models")).status_code == 401
