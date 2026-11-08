@@ -394,7 +394,8 @@ curl http://<server>:8484/v1/chat/completions \
 ```
 
 Text conversations only (tool use → 400). When every account's window is spent
-it returns `503` + `Retry-After: <seconds to earliest reset>` — point a
+it returns `503` + `Retry-After: <seconds until an account this device may
+use can serve again>` (a window reset, or a weekly cap lifting) — point a
 router's circuit breaker at that. Responses carry `x-rotate-account` and the
 upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 
@@ -525,8 +526,9 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
   account and throw away its warm prompt cache. The account is paced for
   `retry-after` seconds and the request retried.
 - **Hold-until-reset** (`hold_max_s` > 0): when every account is spent, the
-  proxy keeps the request open and retries after the soonest 5h reset instead
-  of failing — an unattended CI/agent run finishes on its own instead of dying
+  proxy keeps the request open and retries once the soonest account this
+  device may use can serve again (a window reset, or a weekly cap lifting)
+  instead of failing — an unattended CI/agent run finishes on its own instead of dying
   at 2am. Make sure your client's request timeout tolerates the wait (Claude
   Code's default is generous; other clients may need tuning).
 

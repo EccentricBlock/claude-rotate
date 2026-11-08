@@ -679,10 +679,37 @@ def can_fall_back_to(name: str) -> bool:
             and THRESHOLD_7D - util_7d(name) >= RESERVE_HEADROOM)
 
 
-def earliest_relief() -> float:
-    """Soonest moment any account can serve again (for hold-until-reset)."""
+def cap_relief_ts(name: str) -> float:
+    """When the weekly cap of an account that fails cap_ok lifts. Flat: at the
+    weekly reset. Paced: when the rising allowance passes util_7d, no earlier
+    than now and no later than the reset; at or over the cap, the reset. An
+    unknown or passed reset, or weekly_cap 0, gives inf (no known relief)."""
+    cap = ACCOUNTS[name].get("weekly_cap", 1.0)
+    reset, now = STATE["accounts"].get(name, {}).get("reset_7d"), time.time()
+    if not reset or reset <= now or cap <= 0:
+        return float("inf")
+    used = util_7d(name)
+    if not ACCOUNTS[name].get("weekly_pacing") or used >= cap:
+        return reset
+    lifts = reset - 604800 - cap_lookahead_s(name) + used * 604800 / cap
+    return min(max(lifts, now), reset)
+
+
+def earliest_relief(device: str | None = None) -> float:
+    """Soonest moment an account this device may use can serve again (for
+    hold-until-reset and Retry-After): a window reset, or a weekly cap lifting.
+    Disabled and dead accounts and other devices' private accounts do not
+    count. device=None means no scoping."""
     now = time.time()
-    resets = [relief_ts(n) for n in ACCOUNTS if not disabled(n)]
+    resets = []
+    for n in ACCOUNTS:
+        if disabled(n) or account_bad(n) or not available_to(n, device):
+            continue
+        relief = relief_ts(n)
+        if not cap_ok(n):
+            spent = rejected(n) or utilization(n) >= HARD_LIMIT or util_7d(n) >= HARD_LIMIT
+            relief = max(relief, cap_relief_ts(n)) if spent else cap_relief_ts(n)
+        resets.append(relief)
     resets = [r for r in resets if now < r < float("inf")]
     return min(resets) if resets else now + 300
 
@@ -1813,7 +1840,7 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
         if not retry and verdict == "exhausted" and hold_deadline and not bad:
             # Every account is spent: hold the request open until the soonest
             # window reset instead of failing, so unattended runs finish.
-            wait = min(earliest_relief() + 5, hold_deadline) - time.time()
+            wait = min(earliest_relief(device) + 5, hold_deadline) - time.time()
             retry = wait > 0
         if not retry:
             noted = True
@@ -1872,7 +1899,7 @@ async def openai_chat(request: Request):
 
     if upstream.status_code == 429 and verdict == "exhausted":
         await bounded_response(upstream)
-        retry_after = max(1, round(earliest_relief() - time.time()))
+        retry_after = max(1, round(earliest_relief(device) - time.time()))
         rec["status"] = 503
         audit(rec)
         return JSONResponse(

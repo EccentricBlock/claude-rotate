@@ -292,4 +292,24 @@ check("stranger request 200", r.status_code == 200)
 check("stranger is NOT served from a private account",
       r.headers.get("x-rotate-account") == "shared")
 
+# earliest_relief is scoped to the requesting device: pam's private account
+# resets in 3 days, dave's in 1 hour, everything is spent.
+saved_accts, saved_state = R.ACCOUNTS, R.STATE
+R.ACCOUNTS = {
+    "pam":  {"name": "pam", "token": "tok-pam", "private_to": "pam-mac"},
+    "dave": {"name": "dave", "token": "tok-dave", "private_to": "dave-mac"},
+}
+spent = {"util_5h": 1.0, "util_7d": 1.0, "status": "rejected", "last_seen": now - 10}
+R.STATE = {"active_account": "pam", "events": [], "last_switch_ts": 0, "accounts": {
+    "pam":  dict(spent, reset_5h=now + 3 * 86400, reset_7d=now + 3 * 86400),
+    "dave": dict(spent, reset_5h=now + 3600, reset_7d=now + 3600),
+}}
+check("earliest_relief(pam-mac) waits for pam's own reset, not dave's",
+      abs(R.earliest_relief("pam-mac") - (now + 3 * 86400)) < 60)
+check("earliest_relief(dave-mac) is dave's reset",
+      abs(R.earliest_relief("dave-mac") - (now + 3600)) < 60)
+check("earliest_relief(None) keeps the global minimum",
+      abs(R.earliest_relief(None) - (now + 3600)) < 60)
+R.ACCOUNTS, R.STATE = saved_accts, saved_state
+
 print(f"\nall {PASS} checks passed")
