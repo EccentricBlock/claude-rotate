@@ -956,7 +956,7 @@ Based on clement-z `56ef19e`
 **Panel**
 
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
-- Showed each account's weekly cap or paced allowance as a badge in the panel, and added `weekly_cap`, `weekly_pacing` and `weekly_allowance` to `/rotate/status`.
+- Showed each account's weekly cap or paced allowance as a badge in the panel, and added `weekly_cap`, `weekly_pacing` and `weekly_allowance` to `/rotate/status` ([32b5221](https://github.com/mrglrlgrlgrl/claude-rotate/commit/32b5221)).
 
 ### clement-z/claude-rotate
 
