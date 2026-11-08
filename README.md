@@ -183,8 +183,8 @@ gauge moving.
   *active* session credential, not previously minted setup tokens.
 - Treat each token file as a year-long bearer credential for that Anthropic
   account (see [Security notes](#security-notes)). When a token dies early, the
-  proxy's upstream calls start returning 401 for that account — the roadmap has
-  an alert for this.
+  proxy's upstream calls start returning 401 for that account — the proxy
+  raises no alert for this, so watch for 401s (see Troubleshooting).
 - Scope note: subscription OAuth tokens are for Claude Code traffic — which is
   all this proxy forwards — and per the 2026 docs they are rejected by the raw
   Messages API.
