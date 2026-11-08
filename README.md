@@ -711,7 +711,7 @@ zeros until traffic flows.
 **Client throws Zlib/Brotli decoding errors.** Shouldn't happen — the proxy
 forces `accept-encoding: identity` upstream and strips `content-encoding`
 from responses. If it appears after modifying `rotator.py`, you broke
-load-bearing fact #2 in the continuation notes.
+the encoding fact in `AGENTS.md` "Implementation facts".
 
 ## Limitations
 
@@ -845,80 +845,6 @@ commercial or shared, use the API with metered billing instead.
   its entry in `config.json`. The proxy drops it at its next reload.
 - Don't expose port 8484 to the public internet; bind to a tailnet/LAN
   interface or keep `bind: 0.0.0.0` behind a firewall.
-
----
-
-## For the next agent (continuation notes)
-
-Everything lives in **`rotator.py` (~450 lines, FastAPI)** — read it top to
-bottom before changing anything. `phase0_proxy.py` is a standalone logging
-passthrough kept for debugging header behavior; not part of the service.
-
-Load-bearing implementation facts (each was verified empirically — keep them):
-
-1. **Transparent passthrough.** The proxy forwards all paths/methods to
-   `api.anthropic.com`, replacing only the `Authorization` header. Claude Code
-   sends its own `anthropic-beta: oauth-2025-04-20` etc. — do not strip or
-   reorder client headers.
-2. **Encoding trick.** Forwarded requests force `accept-encoding: identity`
-   and the response's `content-encoding` header is dropped — otherwise httpx
-   auto-decompresses while the original header survives and the client throws
-   Zlib/Brotli errors.
-3. **Quota telemetry** comes from `anthropic-ratelimit-unified-5h-utilization`
-   / `-7d-utilization` / `-5h-reset` / `-status` response headers (present on
-   Max subscription traffic; undocumented — re-verify after Anthropic API
-   changes).
-4. **SSE usage capture** parses `data:` lines containing `"usage"` while
-   streaming chunks through untouched; audit is written in the stream's
-   `finally`.
-
-Roadmap, in intended order:
-
-- [x] **Tests.** `python3 tests/run_all.py` — 101 offline checks, no network
-      (needs a valid `config.json` to import the module):
-      `test_rotator.py` switch logic (consume-first ordering, burst-vs-quota
-      429, cooldown, hysteresis, hold/exhausted verdicts, window-reset
-      recovery); `test_analytics.py` SSE usage capture, pricing/cost math,
-      `aggregate_audit` rollups/alerts/roster; `test_proxy.py` end-to-end HTTP
-      through the real ASGI app against a mocked upstream (auth, header
-      rewriting incl. the encoding trick, SSE relay, transparent quota-429
-      rotate+retry, burst pacing, 429 passthrough vs hold-until-reset, admin
-      endpoints, idle-account usage refresh); `test_stress.py` high-traffic behavior (300-request
-      fan-out with throughput floor, exactly-one-switch race check with 100
-      in-flight requests during a quota hit, burst storm without rotation,
-      20 concurrent held requests, 50 parallel SSE streams, events-list
-      bound under churn, aggregate_audit speed on a 50k-row log).
-- [x] **OpenAI-compatible endpoint.** `POST /v1/chat/completions` (see its
-      section above): OpenAI ↔ Anthropic translation incl. SSE chunks, in
-      `oai_compat.py` (pure, tested offline in `tests/test_oai_compat.py`);
-      injects `anthropic-version` + `anthropic-beta: oauth-2025-04-20`,
-      forwards NO client headers, refuses tool use with a 400. The rotation
-      loop is shared with the transparent proxy (`send_upstream`).
-- [x] **Exhaustion signal.** The OpenAI endpoint returns 503 +
-      `Retry-After: <earliest reset>` when all accounts are spent (after any
-      `hold_max_s` hold is exhausted) — point a router's breaker at it. The
-      transparent proxy deliberately still passes Anthropic's 429 through:
-      Claude Code handles those natively, and that path's contract is
-      transparency.
-- [ ] **Webhook alerts** (Slack/Teams/generic POST) firing on the same rules
-      as the panel's alerts section.
-- [ ] **In-process audit rotation** — roll `logs/audit.jsonl` past a size/age
-      threshold so the Operations section's cron recipe becomes unnecessary,
-      and stop re-reading the whole file per stats call (seek from the tail).
-- [x] **Dockerfile** (+ compose example) — also enables running as a sidecar
-      next to a router in k8s; tokens mounted as secrets. See
-      [Docker](#docker).
-- [x] **Hot config reload.** An mtime poll of `config.json` and the token
-      files plus `SIGHUP`, in `rotator.py` (`reload_config`); see
-      [Reloading the configuration](#reloading-the-configuration).
-- [ ] **Token renewal automation** — setup-tokens last ~1 year; at minimum
-      alert on auth failures (401 from upstream on a known-good account
-      usually means the token died).
-
-Style: keep it one file until it genuinely hurts; stdlib + fastapi/httpx only;
-every new claim about Anthropic behavior gets verified against the live API
-before being relied on (the `phase0_proxy.py` harness exists for exactly
-that).
 
 ## Fork changes
 

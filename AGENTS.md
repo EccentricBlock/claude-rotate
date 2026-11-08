@@ -70,6 +70,28 @@ fork is not swept to match, so later merges stay clean.
 - Settle ambiguity up front by asking, so the work is a mechanical series of
   steps.
 
+## Implementation facts
+
+Four facts about the proxy were each verified against the live API. Keep them
+true when you change `rotator.py`. `phase0_proxy.py` is a standalone logging
+passthrough for checking header behaviour. It is not part of the service.
+
+1. **Transparent passthrough.** The proxy forwards every path and method to
+   `api.anthropic.com` and replaces only the `Authorization` header. Claude
+   Code sends its own headers, such as `anthropic-beta: oauth-2025-04-20`.
+   Do not strip or reorder them.
+2. **Encoding trick.** Forwarded requests force `accept-encoding: identity`,
+   and the proxy drops the response's `content-encoding` header. Without both,
+   httpx decompresses the body while the original header survives, and the
+   client fails with Zlib or Brotli errors.
+3. **Quota telemetry.** Quota state comes from the response headers
+   `anthropic-ratelimit-unified-5h-utilization`, `-7d-utilization`,
+   `-5h-reset` and `-status`. Max subscription traffic carries them. They are
+   undocumented, so re-verify them after Anthropic API changes.
+4. **SSE usage capture.** The proxy parses `data:` lines that contain `"usage"`
+   while it streams chunks through untouched. It writes the audit record in
+   the stream's `finally` block.
+
 ## Keeping the README current
 
 A change to documented behaviour updates the README in the same commit. Such a
