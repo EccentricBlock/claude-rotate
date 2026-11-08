@@ -1123,6 +1123,10 @@ async def rotate_status(request: Request):
         info["priority"] = priority(name)
         info["disabled"] = disabled(name)
         info["private_to"] = owners(name) or None
+        info["weekly_cap"] = ACCOUNTS[name].get("weekly_cap")
+        info["weekly_pacing"] = bool(ACCOUNTS[name].get("weekly_pacing"))
+        info["weekly_allowance"] = round(cap_allowance(name), 4) \
+            if info["weekly_cap"] is not None or info["weekly_pacing"] else None
         info["account_bad"] = account_bad(name)
         info["on_probation"] = on_probation(name)
         if account_bad(name) and bad_recover_wait(name):
@@ -1668,6 +1672,7 @@ async function refresh(){
     const seen=a.last_seen?ago(Math.round((Date.now()/1000-a.last_seen)/60)):'never';
     return `<div class="card"><div class="acct-head"><b>${esc(name)}</b>${name===st.active_account?'<span class="badge"><span class="dot" style="background:var(--good)"></span>active</span>':''}`
       +(a.disabled?'<span class="badge">disabled</span>':'')+(a.private_to?`<span class="badge">private to ${esc([].concat(a.private_to).join(', '))}</span>`:'')+(a.priority!==100?`<span class="badge">prio ${esc(a.priority)}</span>`:'')
+      +(a.weekly_allowance!=null?`<span class="badge">${esc((a.weekly_pacing?'paced '+Math.round(a.weekly_allowance*100)+'% now of '+Math.round((a.weekly_cap==null?1:a.weekly_cap)*100)+'%':'weekly cap '+Math.round(a.weekly_allowance*100)+'%')+(u7>=a.weekly_allowance?' · reached':''))}</span>`:'')
       +`<span class="muted small" style="margin-left:auto">upstream: ${esc(a.status||'n/a')} &middot; seen ${seen}</span></div>`
       +meter('5h',u5,st.switch_threshold,a.reset_5h_in_min>0?'resets in '+dur(a.reset_5h_in_min*60):'window idle',a.reset_5h_in_min>0&&a.reset_5h)
       +meter('7d',u7,st.switch_threshold_7d,a.reset_7d_in_h>0?'resets in '+dur(a.reset_7d_in_h*H):'window idle',a.reset_7d_in_h>0&&a.reset_7d)+'</div>'}).join('');

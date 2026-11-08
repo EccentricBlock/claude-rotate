@@ -348,7 +348,10 @@ rate-limit headers:
   with a tick at the switch threshold, reset countdowns, upstream status and
   the active account. Hover a reset countdown for the exact reset time in your
   browser's time zone and in UTC. A private account carries a "private to
-  <device>" badge.
+  <device>" badge. An account with `weekly_cap` or `weekly_pacing` also
+  carries a badge for the limit in force: `weekly cap 50%`, or `paced 11% now
+  of 50%` for a paced account, with ` · reached` added once its weekly use is
+  at or over that limit.
 - **Weekly quota, all accounts** — the enabled accounts' current weekly
   usage, summed (blue), against their combined capacity (orange: 100% per
   account, scaled by `accounts[].weight`). Usage drops at each account's weekly
@@ -376,7 +379,7 @@ The 24 h figures come from the audit log. Longer periods come from
 minute. On first start it is rebuilt once from `audit.jsonl` and its rotated
 copies, so all time reaches back as far as those logs do.
 
-JSON endpoints: `/rotate/status` (accounts, each with its `private_to` owners as a list or null, + switch events) and
+JSON endpoints: `/rotate/status` (accounts, each with its `private_to` owners as a list or null, its `weekly_cap`, `weekly_pacing` and `weekly_allowance` (the weekly use allowed now, or null with neither setting), + switch events) and
 `/rotate/stats` (rollups, alerts and the longer `periods`), same `?key=` or `Authorization: Bearer`
 auth. Audit trail: `logs/audit.jsonl`, one JSON record per request.
 
@@ -953,6 +956,7 @@ Based on clement-z `56ef19e`
 **Panel**
 
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
+- Showed each account's weekly cap or paced allowance as a badge in the panel, and added `weekly_cap`, `weekly_pacing` and `weekly_allowance` to `/rotate/status`.
 
 ### clement-z/claude-rotate
 

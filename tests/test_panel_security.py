@@ -39,6 +39,17 @@ const context = vm.createContext({URL,URLSearchParams,location:{search:'?key=fak
   assert(elements.accounts.innerHTML.includes('private to &lt;mark') && elements.accounts.innerHTML.includes('&lt;/mark&gt;-2'),'private badge missing or unescaped');
   const titles=elements.accounts.innerHTML.match(/title="[^"]*2026-11-05 13:00 UTC"/g)||[];
   assert.equal(titles.length,2,'5h and 7d reset spans need a UTC title');
+  const acct=(extra)=>{status.accounts={flat:Object.assign({priority:100},extra)};return vm.runInContext('refresh()',context,{timeout:1000}).then(()=>elements.accounts.innerHTML)};
+  let html=await acct({weekly_cap:.5,weekly_pacing:false,weekly_allowance:.5,effective_util_7d:.2});
+  assert(html.includes('weekly cap 50%') && !html.includes('reached') && !html.includes('paced'),'flat cap badge wrong');
+  html=await acct({weekly_cap:.5,weekly_pacing:true,weekly_allowance:.1071,effective_util_7d:.05});
+  assert(html.includes('paced 11% now of 50%') && !html.includes('reached') && !html.includes('weekly cap'),'paced badge wrong');
+  html=await acct({weekly_cap:null,weekly_pacing:true,weekly_allowance:.1071,effective_util_7d:.05});
+  assert(html.includes('paced 11% now of 100%'),'paced badge without a cap wrong');
+  html=await acct({weekly_cap:.5,weekly_pacing:true,weekly_allowance:.1071,effective_util_7d:.2});
+  assert(html.includes('paced 11% now of 50% · reached'),'reached marker missing');
+  html=await acct({weekly_cap:null,weekly_pacing:false,weekly_allowance:null,effective_util_7d:.2});
+  assert(!html.includes('weekly cap') && !html.includes('paced'),'badge shown without cap or pacing');
   console.log('panel JavaScript security checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''

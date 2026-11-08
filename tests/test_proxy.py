@@ -249,7 +249,30 @@ try:
 finally:
     del R.ACCOUNTS["a"]["private_to"]
 check("status lists every owner", acct["private_to"] == ["dev-1", "dev-2"])
-check("status auth via ?key=", call(path="/rotate/status?key=devkey-1", key=None,
+def status_for(**keys):
+    R.ACCOUNTS["a"].update(keys)
+    try:
+        return call(path="/rotate/status", method="GET").json()["accounts"]["a"]
+    finally:
+        for k in keys:
+            del R.ACCOUNTS["a"][k]
+
+
+acct = status_for()
+check("status: no cap or pacing gives null cap, false pacing, null allowance",
+      acct["weekly_cap"] is None and acct["weekly_pacing"] is False and acct["weekly_allowance"] is None)
+acct = status_for(weekly_cap=0.5)
+check("status: flat cap gives the cap as the allowance",
+      acct["weekly_cap"] == 0.5 and acct["weekly_pacing"] is False and acct["weekly_allowance"] == 0.5)
+fresh_state(accounts={"a": {"reset_7d": time.time() + 6 * 86400}})
+acct = status_for(weekly_cap=0.5, weekly_pacing=True)
+check("status: paced allowance is the cap ramped through the week",
+      acct["weekly_cap"] == 0.5 and acct["weekly_pacing"] is True and acct["weekly_allowance"] == 0.1071)
+acct = status_for(weekly_pacing=True)
+check("status: pacing without a cap gives a null cap and a ramped allowance",
+      acct["weekly_cap"] is None and acct["weekly_pacing"] is True and acct["weekly_allowance"] == 0.2143)
+fresh_state()
+check("status auth via ?key=",call(path="/rotate/status?key=devkey-1", key=None,
                                     method="GET").status_code == 200)
 r = call(path="/rotate/stats", method="GET")
 check("stats returns rollups", r.status_code == 200 and "by_device" in r.json()
