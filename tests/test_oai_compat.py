@@ -192,6 +192,30 @@ def test_normal_stream_still_ends_with_stop_and_usage():
     assert chunks[1]["usage"]["completion_tokens"] == 7
 
 
+def test_feed_bytes_keeps_a_character_split_across_chunks():
+    text = "γ€ 日本語 😀 café"
+    # ensure_ascii=False puts the raw multi-byte characters on the wire.
+    event = ("data: " + json.dumps(
+        {"type": "content_block_delta",
+         "delta": {"type": "text_delta", "text": text}},
+        ensure_ascii=False) + "\n\n").encode()
+    assert len(event) > len(event.decode())
+    for cut in range(1, len(event)):
+        tr = SseToOai()
+        got = tr.feed_bytes(event[:cut]) + tr.feed_bytes(event[cut:])
+        content = "".join(c["choices"][0]["delta"].get("content", "")
+                          for c in _parse_chunks(got))
+        assert content == text, cut
+
+
+def test_feed_bytes_still_replaces_invalid_bytes():
+    tr = SseToOai()
+    got = tr.feed_bytes(b'data: {"type":"content_block_delta","delta":'
+                        b'{"type":"text_delta","text":"a\xffb"}}\n')
+    assert _parse_chunks(got)[0]["choices"][0]["delta"]["content"] == "a�b"
+    tr.tail()                                  # flushing the decoder is safe
+
+
 if __name__ == "__main__":
     import sys as _sys
     fns = [(n, f) for n, f in sorted(globals().items())

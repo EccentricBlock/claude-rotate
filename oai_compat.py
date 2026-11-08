@@ -10,6 +10,7 @@ like a model failure to the caller.
 """
 from __future__ import annotations
 
+import codecs
 import json
 import time
 
@@ -132,6 +133,9 @@ class SseToOai:
         self.usage: dict = {}
         self.finish_reason: str | None = None
         self.errored = False
+        # Upstream chunks are cut at arbitrary byte offsets, so a multi-byte
+        # character can span two of them.
+        self._dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     @staticmethod
     def _error_chunk(message: str, etype: str) -> str:
@@ -151,6 +155,9 @@ class SseToOai:
         for k, v in (u or {}).items():
             if isinstance(v, (int, float)):
                 self.usage[k] = v
+
+    def feed_bytes(self, chunk: bytes) -> str:
+        return self.feed(self._dec.decode(chunk))
 
     def feed(self, text: str) -> str:
         self._buf += text
@@ -189,6 +196,8 @@ class SseToOai:
         return "".join(out)
 
     def tail(self) -> str:
+        # Flush the decoder first: bytes it held back may complete a final line.
+        self.feed(self._dec.decode(b"", final=True))
         if self.errored:
             return "data: [DONE]\n\n"
         if self.finish_reason is None:

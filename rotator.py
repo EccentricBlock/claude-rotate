@@ -1929,7 +1929,7 @@ async def openai_chat(request: Request):
         async def relay():
             try:
                 async for chunk in upstream.aiter_bytes():
-                    out = tr.feed(chunk.decode("utf-8", errors="replace"))
+                    out = tr.feed_bytes(chunk)
                     if out:
                         yield out.encode()
                 yield tr.tail().encode()
