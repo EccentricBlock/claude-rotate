@@ -5,7 +5,7 @@ config dependency so they can be unit-tested offline (rotator.py needs config.js
 at import; this module needs nothing).
 
 Scope: text conversations. Tool use is REFUSED loudly (400) rather than
-mistranslated silently — the schemas differ and a wrong translation would look
+mistranslated silently: the schemas differ and a wrong translation would look
 like a model failure to the caller.
 """
 from __future__ import annotations
@@ -116,7 +116,7 @@ def anthropic_to_oai(msg: dict) -> dict:
 class SseToOai:
     """Incremental Anthropic SSE -> OpenAI chunk translator.
 
-    feed() takes decoded upstream text (any chunking — lines may split anywhere)
+    feed() takes decoded upstream text (any chunking, so lines may split anywhere)
     and returns whatever OpenAI `data:` lines are ready; tail() emits the final
     chunk, a usage chunk, and [DONE]. `usage` accumulates the Anthropic-style
     usage dict across message_start/message_delta for the caller's audit record.

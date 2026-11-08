@@ -27,7 +27,7 @@ jobs:
       - name: Create test fixture config
         # Importing rotator needs a config.json with at least one account
         # whose token file exists. The tests override everything else.
-        # add-device replaces the example's PUBLIC placeholder key — rotator
+        # add-device replaces the example's PUBLIC placeholder key; rotator
         # refuses to boot while one remains (load_config, issue #2), so CI
         # goes through the same onboarding step a real install does.
         run: |

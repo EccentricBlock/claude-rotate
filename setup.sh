@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# File-based setup for claude-rotate. No database, no cloud — everything lives
+# File-based setup for claude-rotate. No database, no cloud: everything lives
 # in config.json + tokens/ next to this script.
 #
 #   ./setup.sh                       first-time init (creates config.json, dirs)

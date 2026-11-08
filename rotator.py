@@ -12,9 +12,9 @@ Per request, the proxy:
   4. records usage + account utilization (from anthropic-ratelimit-unified-*
      headers) to logs/audit.jsonl and state.json,
   5. rotates accounts: consume-first by default (burn the account whose weekly
-     window resets soonest — use-it-or-lose-it), with cooldown + hysteresis so
+     window resets soonest, use-it-or-lose-it), with cooldown + hysteresis so
      accounts never ping-pong at the threshold,
-  6. tells spent quota apart from per-minute burst 429s — a burst paces the
+  6. tells spent quota apart from per-minute burst 429s: a burst paces the
      same account (keeps the warm prompt cache) instead of rotating,
   7. optionally holds a request open until the soonest window reset when every
      account is spent (hold_max_s), so unattended runs finish on their own,
@@ -276,8 +276,8 @@ def settings(cfg: dict) -> dict:
                                     "messages": [{"role": "user", "content": "."}]}).encode(),
         # A closed/free account (403/404) is marked bad and skipped. The mark must not be
         # permanent (a plan can be renewed, a block lifted), so an account is reconsidered
-        # BAD_RECOVER_S after it was last marked bad — doubling each time it refuses again
-        # (bad_count), capped at BAD_RECOVER_MAX_S — and only a 200 fully clears it.
+        # BAD_RECOVER_S after it was last marked bad, doubling each time it refuses again
+        # (bad_count), capped at BAD_RECOVER_MAX_S, and only a 200 fully clears it.
         # 0 = never reconsider.
         "BAD_RECOVER_S": cfg.get("bad_recover_s", 600),
         "BAD_RECOVER_MAX_S": cfg.get("bad_recover_max_s", 86400),
@@ -531,7 +531,7 @@ def bad_recover_wait(name: str) -> float:
 
 
 def on_probation(name: str) -> bool:
-    """Refused a request (403/404) and has not answered 200 since — whether or
+    """Refused a request (403/404) and has not answered 200 since, whether or
     not the bad mark has expired. Such an account is only used when traffic is
     forced off the active one; no voluntary switch moves onto it, so a stale low
     utilisation can't make a strategy keep re-picking a closed account."""
@@ -563,7 +563,7 @@ def hard_ok(name: str) -> bool:
 
 
 def binding_reset(name: str) -> float:
-    """Reset time of the window with the least room left — when the account's
+    """Reset time of the window with the least room left, when the account's
     remaining capacity stops being the bottleneck (or is lost, if unused)."""
     info = STATE["accounts"].get(name, {})
     room_5h = HARD_LIMIT - utilization(name)
@@ -672,7 +672,7 @@ def weekly_pace(name: str) -> float:
 
 
 def fresh_session(name: str) -> bool:
-    """5h window not started (or already reset) — a session to rotate into."""
+    """5h window not started (or already reset), a session to rotate into."""
     return utilization(name) < 0.01
 
 
@@ -728,15 +728,15 @@ def pick_account(device: str | None = None) -> str | None:
     the strategy orders accounts within that.
 
     consume-first (default): burn the usable account whose weekly window resets
-    soonest — weekly quota is use-it-or-lose-it, so spend the perishable one.
+    soonest, weekly quota is use-it-or-lose-it, so spend the perishable one.
     least-used: lowest 5h utilization.
     most-weekly-left: lowest weekly utilization (most weekly quota left), among
     accounts that still have 5h session room; ties broken by lower 5h use.
-    weekly-pace: highest weekly_pace() — the account whose remaining weekly
+    weekly-pace: highest weekly_pace(), the account whose remaining weekly
     quota is likeliest to expire unused; ties broken by lower 5h use.
     Within a tier, reserve about to expire (reserve_spendable) goes first,
-    soonest reset first — it is lost otherwise.
-    Emergency (nothing usable): the reserve band — any hard_ok account, the one
+    soonest reset first, it is lost otherwise.
+    Emergency (nothing usable): the reserve band, any hard_ok account, the one
     whose binding window resets soonest, so traffic runs to the real limit
     instead of stopping at the thresholds.
     If nothing is hard_ok: the non-disabled account that can serve again soonest
@@ -791,11 +791,11 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
     """Update account state from unified rate-limit headers; maybe switch.
     device: whose pointer a switch moves, and whose pool it may pick from.
 
-    bad: True when this account is a closed/free account (403/404 on messages)
-    — it is marked unusable and a hard switch away is forced, so the very next
+    bad: True when this account is a closed/free account (403/404 on messages):
+    it is marked unusable and a hard switch away is forced, so the very next
     request (and a mid-stream retry) lands on a working account.
 
-    Returns what happened: "burst" (per-minute 429, paced — no rotation),
+    Returns what happened: "burst" (per-minute 429, paced, no rotation),
     "switched" (active account changed, retry can ride it), "exhausted"
     (quota gone and nowhere better to go), or None.
     """
@@ -822,7 +822,7 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
         info["last_seen"] = now
 
         if status == 200 and info.get("bad_status"):
-            # A successful reply means the account can serve again — clear the
+            # A successful reply means the account can serve again; clear the
             # closed/free marker so it is reconsidered for rotation.
             for k in BAD_KEYS:
                 info.pop(k, None)
@@ -839,7 +839,7 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
             quota_hit = True  # hard stop: immediately rotate to a working account
         if status == 429 and not quota_hit:
             # Per-minute burst limit, not spent quota. Rotating would just move
-            # the burst to the next account and drop its warm prompt cache —
+            # the burst to the next account and drop its warm prompt cache,
             # pace this account briefly instead.
             try:
                 pace = min(float(headers.get("retry-after", "")), 60.0)
@@ -884,12 +884,12 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
                         reason = f"utilization>={THRESHOLD}"
                 elif cooled and usable(nxt) and not over and not on_probation(nxt):
                     # Voluntary moves never land on an account that last refused
-                    # outright — it gets re-probed only when traffic is forced.
+                    # outright; it gets re-probed only when traffic is forced.
                     if rank(nxt, device) < rank(account, device):
-                        # A preferred account has room again — pull traffic back.
+                        # A preferred account has room again: pull traffic back.
                         reason = "priority_recovery"
                     elif reserve_spendable(nxt) and not reserve_spendable(account):
-                        # Another account's last few % reset soon — spend them
+                        # Another account's last few % reset soon: spend them
                         # before they are lost; come back when it is rejected.
                         reason = "reserve_expiring"
                     elif (STRATEGY == "consume-first"
@@ -908,7 +908,7 @@ async def note_response(account: str, headers: httpx.Headers, status: int,
                           and (not fresh_session(nxt)
                                or sum(can_fall_back_to(n) for n in ACCOUNTS if n != nxt)
                                >= RESERVE_SESSIONS)):
-                        # Proactively move to clearly more perishable quota — but a
+                        # Proactively move to clearly more perishable quota, but a
                         # voluntary move must not start a fresh 5h window unless
                         # somewhere else (the account being left counts) still has
                         # room to rotate into when the new session runs out. Forced
@@ -1246,7 +1246,7 @@ def _tail_audit() -> None:
         identity = (stat.st_dev, stat.st_ino)
         head = f.read(64)
         # A shrunken file, or changed leading bytes, means audit.jsonl was
-        # rotated or rewritten out from under us — the cached window no
+        # rotated or rewritten out from under us, the cached window no
         # longer describes this file, so rebuild from the top. (Size alone
         # can't catch truncate-and-rewrite-bigger; the head fingerprint can.)
         if (cache.get("identity", identity) != identity
@@ -1732,7 +1732,7 @@ def messages_unusable(upstream, url: str) -> bool:
 
 
 def method_is_messages(url: str) -> bool:
-    """True when the upstream path is the Anthropic /v1/messages endpoint itself —
+    """True when the upstream path is the Anthropic /v1/messages endpoint itself,
     not /v1/messages/count_tokens or /v1/messages/batches/..., whose 404s (e.g. an
     unknown batch id) say nothing about the account."""
     return url.split("?", 1)[0].rstrip("/") == "/v1/messages"
@@ -1741,7 +1741,7 @@ def method_is_messages(url: str) -> bool:
 def pick_working(device: str | None = None) -> str | None:
     """The best account that can actually serve right now, or None if none.
     Distinguishes 'a dead account and at least one other works' (return the good
-    one) from 'every account is dead' (None) — so the next request isn't fired
+    one) from 'every account is dead' (None), so the next request isn't fired
     at a closed/free account when a working one is idle."""
     ok = [n for n in ACCOUNTS if hard_ok(n) and available_to(n, device)]
     if not ok:
@@ -1783,7 +1783,7 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
     """The rotation loop shared by the transparent proxy and the OpenAI endpoint:
     pick the device's active account, pace bursts, retry through switches, optionally hold
     until the soonest window reset. Returns (upstream, account, retries, noted,
-    verdict) — noted means note_response already ran for the returned response;
+    verdict): noted means note_response already ran for the returned response;
     verdict is note_response's word for the LAST 429 seen ("burst" / "switched" /
     "exhausted" / None)."""
     hold_deadline = time.time() + HOLD_MAX_S if HOLD_MAX_S else None
@@ -1806,7 +1806,7 @@ async def send_upstream(method: str, url: str, fwd_headers: dict, body: bytes,
             set_device_current(device, account)
             save_state()
         # Never fire a request at an account we already know is a closed/free
-        # dead-end when a working account is available — leave before sending.
+        # dead-end when a working account is available: leave before sending.
         if account_bad(account):
             async with state_lock:
                 good = pick_working(device)
@@ -1872,7 +1872,7 @@ async def openai_chat(request: Request):
     """OpenAI-compatible front door (Phase 3): any OpenAI-format client or router
     rides the rotated Max capacity through here. Translation to /v1/messages with
     the oauth beta header; NO client headers are forwarded, so caller identity
-    stops at this proxy — upstream sees one consumer per device key. When every
+    stops at this proxy: upstream sees one consumer per device key. When every
     account's window is spent this returns 503 + Retry-After (a breaker-friendly
     signal for routers), unlike the transparent proxy below, which stays
     transparent because Claude Code handles Anthropic's own 429s natively."""
