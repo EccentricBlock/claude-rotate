@@ -856,11 +856,6 @@ commercial or shared, use the API with metered billing instead.
 This section lists this fork's changes since doxaras `19529c6`, including
 those taken from other forks.
 
-### mrglrlgrlgrl/claude-rotate (this repo)
-
-Based on doxaras `19529c6`
-([compare](https://github.com/mrglrlgrlgrl/claude-rotate/compare/19529c6...main)).
-
 **Merged from other forks**
 
 - Built on [clement-z/claude-rotate](https://github.com/clement-z/claude-rotate) by Clément Zrounba up to `56ef19e`, 16 commits, authorship preserved ([compare](https://github.com/clement-z/claude-rotate/compare/19529c6...56ef19e)). Its changes are listed in the groups below, marked `clement-z:`.
