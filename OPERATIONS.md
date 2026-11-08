@@ -1,4 +1,4 @@
-# Service operations — Debian 12
+# Service operations: Debian 12
 
 Manage the installed service over SSH. Accounts, device keys and the active
 upstream account are administered with `claude-rotate-admin`, installed by

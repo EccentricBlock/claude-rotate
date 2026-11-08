@@ -37,9 +37,10 @@ Read `agents/shell-traps.md` at the start of every session.
 
 ## Documentation style
 
-These rules apply to prose written in this repo: `AGENTS.md`, `agents/`, and
-new or rewritten sections of the other docs. Text that arrived from another
-fork is not swept to match, so later merges stay clean.
+These rules apply to all prose in this repo (`AGENTS.md`, `agents/`, and the
+other docs) and to code comments and docstrings. Runtime message strings, such
+as `echo` lines in `setup.sh` and error or print text in `rotator.py`, keep
+their wording, because changing them changes program output.
 
 - Prose-only rules are in `agents/documentation-style.md`.
 - Avoid filler openers, padding connectors and slop-jargon. Banned words and
@@ -112,8 +113,7 @@ change without its README update is not finished.
   refactors get no bullet.
 - A change to running or securing the service updates `OPERATIONS.md`,
   `SECURITY.md` or `deploy/README.md` too, or instead.
-- New README prose follows the documentation style. Text around it is not
-  rewritten to match.
+- README prose follows the documentation style.
 
 ## Autonomy
 
