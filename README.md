@@ -411,7 +411,7 @@ upstream `anthropic-ratelimit-unified-*` headers for per-request telemetry.
 |---|---|
 | `accounts[]` | `{name, token_file}`: one `claude setup-token` per subscription, stored under `tokens/` (chmod 600) |
 | `devices{}` | `name → device key`; key is what the device puts in `CLAUDE_CODE_OAUTH_TOKEN` |
-| `accounts[].priority` | lower = preferred; accounts form tiers, backup tiers only used when every preferred account is spent (default 100) |
+| `accounts[].priority` | lower = preferred; accounts form tiers, a backup tier is used once every preferred account is past its switch thresholds or weekly cap, not at 100% (default 100) |
 | `accounts[].disabled` | `true` benches an account: never rotated onto, still shown in the panel |
 | `accounts[].private_to` | a device name, or a list of device names: the account is served *only* to those devices; every other device never touches it. Within its priority tier its owners use it first. `--private-to` writes `priority: 1` for a new account. See "Preferring one account over another". |
 | `accounts[].weight` | plan size relative to the other accounts (default 1): scales the account in the panel's weekly chart and run-out estimate, and in the `weekly-pace` score. Max 20x is 4 times Max 5x: give a 5x `0.25` next to 20x accounts (or a 20x `4` next to 5x accounts, if you leave 5x at 1). |
@@ -565,6 +565,20 @@ When a preferred account's window resets, traffic is pulled back automatically
 (`priority_recovery` in the events feed) after the cooldown; the backup is a
 spillway, not a new home. Accounts without a `priority` share one default tier,
 which is why Level 0 works unchanged.
+
+"Spent" means past a switch threshold, not at 100%. An account is usable while
+its 5h window is under `switch_threshold` and its weekly window is under
+`switch_threshold_7d`, so the backup tier takes over before 100% (defaults 0.8
+and 0.98). The band from a threshold up to `hard_limit` is the account's
+reserve. A preferred account's reserve is used only when no account in any tier
+is usable, or in the last `reserve_spend_5h_s` or `reserve_spend_7d_s` before
+the window holding it there resets. A `weekly_cap` is a hard maximum: an
+account at its cap is neither usable nor reserve, so it never reaches 100%.
+
+To keep a preferred tier filling further before the backup takes over, raise
+`switch_threshold` or `switch_threshold_7d`, or raise or remove `weekly_cap`.
+The cost is a later in-tier switch and a higher chance that a request near 100%
+is rejected and retried.
 
 **Level 2: bench an account.** `"disabled": true` takes an account out of
 rotation entirely (a work account you don't want touched, one you're resting)
