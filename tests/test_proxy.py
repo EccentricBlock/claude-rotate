@@ -135,6 +135,48 @@ check("SSE usage captured to audit",
                                      "cache_read_input_tokens": 0,
                                      "cache_creation_input_tokens": 0})
 
+
+
+class ChunkedBody(httpx.AsyncByteStream):
+    def __init__(self, *chunks):
+        self.chunks = chunks
+
+    async def __aiter__(self):
+        for c in self.chunks:
+            yield c
+
+
+def sse_upstream(*chunks):
+    use_upstream(lambda req: httpx.Response(
+        200, stream=ChunkedBody(*chunks),
+        headers={**unified(), "content-type": "text/event-stream"}))
+
+
+# A usage line cut inside its JSON, and again inside a multi-byte character.
+fresh_state()
+cut = SSE.index('"output_tokens": 33') + len('"output_tokens": 3')
+sse_upstream(SSE[:cut].encode(), SSE[cut:].encode())
+r = call()
+check("split SSE body relayed byte-identical", r.content == SSE.encode())
+recs = audit_recs()
+check("usage line split across chunks still counted",
+      recs[-1]["usage"]["input_tokens"] == 11 and recs[-1]["usage"]["output_tokens"] == 33)
+
+fresh_state()
+sse_upstream(SSE.rstrip("\n").encode())
+r = call()
+recs = audit_recs()
+check("final usage line without a newline still counted",
+      r.text == SSE.rstrip("\n") and recs[-1]["usage"]["output_tokens"] == 33)
+
+fresh_state()
+raw = 'data: {"usage": {"output_tokens": 5}, "t": "é"}\n'.encode()
+mid = raw.index("é".encode()) + 1  # inside the two-byte character
+sse_upstream(raw[:mid], raw[mid:])
+call()
+check("usage line cut inside a UTF-8 character still counted",
+      audit_recs()[-1]["usage"]["output_tokens"] == 5)
+
 # --- 4. quota 429 → rotate → transparent retry -------------------------------
 fresh_state("a", {"b": {"util_5h": 0.1, "util_7d": 0.1}})
 calls = []

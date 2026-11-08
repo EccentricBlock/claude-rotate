@@ -2009,12 +2009,20 @@ async def proxy(request: Request, path: str):
         usage_acc: dict = {}
 
         async def relay():
+            pending = b""  # tail of the stream after its last newline
             try:
                 async for chunk in upstream.aiter_bytes():
-                    usage_from_sse(chunk.decode("utf-8", errors="replace"), usage_acc)
+                    pending += chunk
+                    cut = pending.rfind(b"\n") + 1
+                    if cut:
+                        usage_from_sse(pending[:cut].decode("utf-8", errors="replace"),
+                                       usage_acc)
+                        pending = pending[cut:]
                     yield chunk
             finally:
                 await upstream.aclose()
+                if pending:
+                    usage_from_sse(pending.decode("utf-8", errors="replace"), usage_acc)
                 rec["usage"] = summarize_usage(usage_acc)
                 rec["util_5h"] = upstream.headers.get("anthropic-ratelimit-unified-5h-utilization")
                 audit(rec)
