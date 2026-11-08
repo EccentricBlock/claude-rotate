@@ -1,11 +1,9 @@
 name: tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
-  # image.yml runs these tests before it publishes an image.
+  # image.yml runs these tests on each push to main and each v* tag, before it publishes an image.
   workflow_call:
 
 jobs:

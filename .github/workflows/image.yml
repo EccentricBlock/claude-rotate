@@ -1,19 +1,46 @@
 name: image
 
 # Publishes the Docker image to ghcr.io/<owner>/claude-rotate once the tests
-# pass: `latest` and `main` follow the main branch, and a v* tag adds its
-# version tags. Pull requests are not published.
+# pass. A push to main publishes `edge` and `sha-<short>`. A v* tag publishes
+# its version tags (`X.Y.Z`, `X.Y`) and, for a non-pre-release tag, `latest`.
+# Pull requests are not published; tests.yml runs their tests.
 on:
   push:
     branches: [main]
     tags: ["v*"]
 
 jobs:
+  # On a tag, look for a green push run of this workflow on the tagged commit
+  # from main. If there is one, the matrix has already run on exactly this
+  # code, so `tests` is skipped. Any other answer leaves `tested` false and
+  # the tests run.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      tested: ${{ steps.lookup.outputs.tested || 'false' }}
+    steps:
+      - id: lookup
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          answer=$(gh api "repos/${{ github.repository }}/actions/workflows/image.yml/runs?head_sha=${{ github.sha }}&branch=main&event=push&status=success" --jq '"\(.total_count) \(.workflow_runs[0].id // "none")"' || true)
+          count=${answer%% *}
+          echo "main runs: ${answer:-no answer}"
+          if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ]; then
+            echo "tested=true" >> "$GITHUB_OUTPUT"
+          fi
+
   tests:
+    needs: gate
+    if: needs.gate.outputs.tested != 'true'
     uses: ./.github/workflows/tests.yml
 
   image:
-    needs: tests
+    needs: [gate, tests]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && (needs.tests.result == 'success' || (needs.tests.result == 'skipped' && needs.gate.outputs.tested == 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,11 +63,10 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=branch
+            type=edge
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@v7
         with:

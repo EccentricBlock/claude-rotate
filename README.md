@@ -619,8 +619,9 @@ For routine Debian service management, see the [operations quick guide](OPERATIO
 ### Docker
 
 The repository's `Dockerfile` builds a small image (Python 3.12, non-root user,
-dependencies from `requirements.lock`); every push to `main` publishes it to
-`ghcr.io/mrglrlgrlgrl/claude-rotate` for amd64 and arm64.
+dependencies from `requirements.lock`). It is published to
+`ghcr.io/mrglrlgrlgrl/claude-rotate` for amd64 and arm64: each push to `main`
+publishes `edge`, and each `vX.Y.Z` tag publishes `X.Y.Z`, `X.Y` and `latest`.
 [`deploy/compose.yaml`](deploy/compose.yaml) is a ready example:
 
 ```sh
