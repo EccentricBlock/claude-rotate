@@ -1,7 +1,7 @@
 # Documentation style: prose rules
 
-These rules apply in full to prose written in this repo: `AGENTS.md`, `agents/`
-and new or rewritten sections of the other docs. The mechanical rules (no em
+These rules apply in full to prose written in this repo: `SPEC.md`, `AGENTS.md`,
+`agents/` and new or rewritten sections of the other docs. The mechanical rules (no em
 dashes, UK English, the banned words, the wrap rule, readable names) are in the
 "Documentation style" section of `AGENTS.md` and apply everywhere.
 

@@ -3,11 +3,13 @@
 claude-rotate is a small self-hosted proxy that lets Claude Code use several
 Claude subscriptions and switches accounts when one reaches its rate limit.
 
-This file carries working conventions: how to work in this repo. It does not
-carry the design. `README.md` and the code are the design.
+This file carries working conventions: how to work in this repo. The design is
+in `SPEC.md`; `README.md` is the contract for users.
 
 ## Document map
 
+- **`SPEC.md`** is the design: constraints, architecture and the verified API
+  facts.
 - **`README.md`** is the contract for users: setup, configuration keys and
   their defaults, rotation policy. Its config table is the reference for
   every key in `config.json`.
@@ -52,9 +54,9 @@ their wording, because changing them changes program output.
   to", "in conclusion", "not only X but also Y", "isn't just X, it's Y".
   - A banned word used in its literal technical sense stays.
 - No em dashes. Use UK English (behaviour, licence as a noun, organise).
-- Wrap lines at 80 columns in `AGENTS.md` and `agents/`. Four things stay
-  unwrapped: fenced code blocks, table rows, lines that hold a URL, and a
-  single token longer than the line.
+- Wrap lines at 80 columns in `SPEC.md`, `AGENTS.md` and `agents/`. Four
+  things stay unwrapped: fenced code blocks, table rows, lines that hold a
+  URL, and a single token longer than the line.
 - Name a commit or PR by its readable title first, with the id in brackets
   after. Never lead with an id alone.
 
@@ -64,34 +66,11 @@ their wording, because changing them changes program output.
 - Follow the library's official usage instead of inventing custom logic.
 - Check for an existing helper before writing a new one. Put a genuinely new
   helper in the shared module, not at the call site.
-- Keep the project's design constraints: one `rotator.py` until that
-  genuinely hurts, and only fastapi, httpx and uvicorn as dependencies.
+- Keep the design constraints and verified API facts in `SPEC.md` section 4.
 - Verify any claim about Anthropic behaviour against the live API, with
   `phase0_proxy.py`, before relying on it. Ask first: that uses a real account.
 - Settle ambiguity up front by asking, so the work is a mechanical series of
   steps.
-
-## Implementation facts
-
-Four facts about the proxy were each verified against the live API. Keep them
-true when you change `rotator.py`. `phase0_proxy.py` is a standalone logging
-passthrough for checking header behaviour. It is not part of the service.
-
-1. **Transparent passthrough.** The proxy forwards every path and method to
-   `api.anthropic.com` and replaces only the `Authorization` header. Claude
-   Code sends its own headers, such as `anthropic-beta: oauth-2025-04-20`.
-   Do not strip or reorder them.
-2. **Encoding trick.** Forwarded requests force `accept-encoding: identity`,
-   and the proxy drops the response's `content-encoding` header. Without both,
-   httpx decompresses the body while the original header survives, and the
-   client fails with Zlib or Brotli errors.
-3. **Quota telemetry.** Quota state comes from the response headers
-   `anthropic-ratelimit-unified-5h-utilization`, `-7d-utilization`,
-   `-5h-reset` and `-status`. Max subscription traffic carries them. They are
-   undocumented, so re-verify them after Anthropic API changes.
-4. **SSE usage capture.** The proxy parses `data:` lines that contain `"usage"`
-   while it streams chunks through untouched. It writes the audit record in
-   the stream's `finally` block.
 
 ## Keeping the README current
 
@@ -111,6 +90,8 @@ change without its README update is not finished.
   for a feature, a behaviour change, a merged PR or a fix for a reported
   issue. Link the commit, PR or issue. Other small fixes, docs, tests and
   refactors get no bullet.
+- A change to a design constraint or an API fact updates `SPEC.md` in the same
+  commit.
 - A change to running or securing the service updates `OPERATIONS.md`,
   `SECURITY.md` or `deploy/README.md` too, or instead.
 - README prose follows the documentation style.

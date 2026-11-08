@@ -730,7 +730,7 @@ zeros until traffic flows.
 **Client throws Zlib/Brotli decoding errors.** Shouldn't happen: the proxy
 forces `accept-encoding: identity` upstream and strips `content-encoding`
 from responses. If it appears after modifying `rotator.py`, you broke
-the encoding fact in `AGENTS.md` "Implementation facts".
+the encoding fact in `SPEC.md` section 4.
 
 ## Limitations
 
