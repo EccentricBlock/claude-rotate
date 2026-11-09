@@ -366,4 +366,91 @@ check("an existing file is loaded, not rebuilt", R.ROLLUP == saved)
 R.audit({"device": "laptop", "model": "claude-sonnet-5", "usage": use})
 check("every audited request is added", R.ROLLUP["total"]["device"]["laptop"]["requests"] == 2)
 
+# --- audit tail edges: ageing out, bad lines, a mid-line tail; rollup rebuild ---
+from collections import deque
+
+
+def fresh_cache(path):
+    R.AUDIT_PATH = path
+    R._AUDIT_CACHE.clear()
+    R._AUDIT_CACHE.update(offset=0, records=deque(), sig=b"", bytes=0, limited_until=0)
+
+
+def jline(r):
+    return json.dumps(r) + "\n"
+
+
+fresh_cache(tmp / "ageing.jsonl")
+t_old, t_new = now - 3600, now + 25 * 3600 - 600
+old_lines = jline(rec(t_old, "laptop", "claude-haiku-4-5", "a", inp=5)) \
+    + jline(rec(t_old + 60, "laptop", "claude-haiku-4-5", "a", inp=6))
+R.AUDIT_PATH.write_text(old_lines)
+check("both records are cached while they are fresh",
+      R.aggregate_audit()["by_device"]["laptop"]["requests"] == 2
+      and len(R._AUDIT_CACHE["records"]) == 2 and R._AUDIT_CACHE["bytes"] == len(old_lines))
+new_line = jline(rec(t_new, "laptop", "claude-haiku-4-5", "a", inp=7))
+with R.AUDIT_PATH.open("a") as f:
+    f.write(new_line)
+_real_time = time.time
+time.time = lambda: now + 25 * 3600
+try:
+    agg = R.aggregate_audit()
+finally:
+    time.time = _real_time
+check("25 h later the old records are dropped from the cache and the totals",
+      [r["usage"]["input_tokens"] for r in R._AUDIT_CACHE["records"]] == [7]
+      and agg["by_device"]["laptop"]["requests"] == 1 and agg["by_device"]["laptop"]["input_tokens"] == 7)
+check("...and their bytes are subtracted from the cached total",
+      R._AUDIT_CACHE["bytes"] == len(new_line) and agg["retained_records"] == 1)
+
+for label, bad in (("a JSON line that is not an object", "[1, 2, 3]\n"),
+                   ("a line whose ts does not parse", jline({"ts": "yesterday-ish", "device": "laptop"})),
+                   ("a line whose ts is not a string", jline({"ts": 12345, "device": "laptop"}))):
+    fresh_cache(tmp / "badline.jsonl")
+    R.AUDIT_PATH.write_text(jline(rec(now - 60, "laptop", "claude-haiku-4-5", "a", inp=1)) + bad)
+    agg = R.aggregate_audit()
+    check(f"{label} is skipped and not counted", agg["by_device"]["laptop"]["requests"] == 1
+          and len(R._AUDIT_CACHE["records"]) == 1)
+    check(f"{label} marks the history as partial for a day",
+          agg["history_limited"] is True and abs(R._AUDIT_CACHE["limited_until"] - (now + 86400)) < 5)
+
+fresh_cache(tmp / "midline.jsonl")
+R.AUDIT_PATH.write_text("x" * 500)  # one oversized fragment, no newline anywhere
+real_bytes = R.AUDIT_CACHE_BYTES
+R.AUDIT_CACHE_BYTES = 100
+try:
+    R._tail_audit()
+finally:
+    R.AUDIT_CACHE_BYTES = real_bytes
+check("a tail that starts mid-line with no newline moves the offset over the fragment",
+      R._AUDIT_CACHE["offset"] == R.AUDIT_PATH.stat().st_size == 500)
+check("...and caches nothing, flagging the history as partial",
+      len(R._AUDIT_CACHE["records"]) == 0 and R._AUDIT_CACHE["bytes"] == 0
+      and R._AUDIT_CACHE["limited_until"] > now)
+
+# an unreadable or invalid rollup file is rebuilt from the audit log with a warning
+R.AUDIT_PATH, R.USAGE_PATH = tmp / "rebuild.jsonl", tmp / "rebuild_usage.json"
+audited = [rec(now - 60, "laptop", "claude-opus-5", "a", inp=100, out=5),
+           rec(now - 120, "ci-box", "claude-haiku-4-5", "b", inp=200, out=7)]
+R.AUDIT_PATH.write_text("".join(jline(r) for r in audited))
+R.ROLLUP = empty_rollup()
+for r in audited:
+    R.roll_up(r, r["ts"][:10])
+expected = json.loads(json.dumps(R.ROLLUP))
+for label, setup in (("invalid JSON", lambda: R.USAGE_PATH.write_text("{truncated")),
+                     ("an unreadable path", lambda: R.USAGE_PATH.mkdir())):
+    if R.USAGE_PATH.is_dir():
+        R.USAGE_PATH.rmdir()
+    elif R.USAGE_PATH.exists():
+        R.USAGE_PATH.unlink()
+    setup()
+    R.ROLLUP = empty_rollup()
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        R.load_rollup()
+    check(f"rollup file with {label}: a warning says it is rebuilding from the audit log",
+          f"warning: rebuilding {R.USAGE_PATH} from the audit log" in err.getvalue())
+    check(f"rollup file with {label}: the rollup equals one rebuilt from the audit records",
+          R.ROLLUP == expected and R.ROLLUP["total"]["device"]["laptop"]["requests"] == 1)
+
 print(f"\nall {PASS} checks passed")
