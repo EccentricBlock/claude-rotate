@@ -955,25 +955,26 @@ async def refresh_idle_accounts() -> None:
                   file=sys.stderr)
 
 
-ALERT_SENT: dict = {}  # alert text -> when it was last posted to the webhook
+ALERT_SENT: dict = {}  # alert key -> when it was last posted to the webhook
 webhook_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
 
 
 async def send_alert_webhook() -> None:
     """POST each current panel alert to alerts.webhook_url, at most once an hour
-    per text. A failure is reported and not retried. The URL is a secret, so it
-    is never printed."""
+    per alert. An alert is its rule and subject (its key), so a count that
+    changes in the text does not post it again. A failure is reported and not
+    retried. The URL is a secret, so it is never printed."""
     url = ALERT_CFG.get("webhook_url")
     if not isinstance(url, str) or not url:
         return
     now = time.time()
-    for text in [t for t, sent in ALERT_SENT.items() if now - sent >= 3600]:
-        del ALERT_SENT[text]
+    for key in [k for k, sent in ALERT_SENT.items() if now - sent >= 3600]:
+        del ALERT_SENT[key]
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     for alert in aggregate_audit()["alerts"]:
-        if alert["text"] in ALERT_SENT:
+        if alert["key"] in ALERT_SENT:
             continue
-        ALERT_SENT[alert["text"]] = now
+        ALERT_SENT[alert["key"]] = now
         try:
             r = await webhook_client.post(url, json={
                 "text": alert["text"], "level": alert["level"], "ts": stamp})
@@ -1402,23 +1403,28 @@ def aggregate_audit() -> dict:
                 expensive_hour[key] = expensive_hour.get(key, 0) + 1
 
     limited = now < _AUDIT_CACHE.get("limited_until", 0)
-    alerts = ([{"level": "warn", "text": "Statistics are partial: older history was "
+    # Each alert has a stable key (rule and subject) that the webhook dedupes
+    # on; its text embeds counts that move.
+    alerts = ([{"level": "warn", "key": "partial",
+                "text": "Statistics are partial: older history was "
                 "rotated, skipped or dropped to stay within resource limits."}] if limited else [])
     for dev, toks in device_hour_tokens.items():
         if toks > ALERT_CFG["device_tokens_per_hour"]:
-            alerts.append({"level": "warn",
+            alerts.append({"level": "warn", "key": f"device_tokens:{dev}",
                            "text": f"{dev} consumed {toks:,} tokens in the last hour "
                                    f"(threshold {ALERT_CFG['device_tokens_per_hour']:,})"})
     for key, n in expensive_hour.items():
-        alerts.append({"level": "info", "text": f"expensive model in use: {key} — {n} requests in the last hour"})
+        alerts.append({"level": "info", "key": f"expensive_model:{key}",
+                       "text": f"expensive model in use: {key} — {n} requests in the last hour"})
     for acct, n in refused_hour.items():
-        alerts.append({"level": "warn",
+        alerts.append({"level": "warn", "key": f"token_refused:{acct}",
                        "text": f"{acct}: upstream refused its token (401) {n} times "
                                "in the last hour; renew it with add-account/add-token"})
     for name in ACCOUNTS:
         u = utilization(name)
         if u >= ALERT_CFG["util_warn"]:
-            alerts.append({"level": "warn", "text": f"{name} 5h window at {u:.0%} (switch threshold {THRESHOLD:.0%})"})
+            alerts.append({"level": "warn", "key": f"util_5h:{name}",
+                           "text": f"{name} 5h window at {u:.0%} (switch threshold {THRESHOLD:.0%})"})
 
     # Roster covers every registered device, traffic or not.
     devices = {}

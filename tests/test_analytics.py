@@ -167,16 +167,49 @@ for t in R.ALERT_SENT:
     R.ALERT_SENT[t] -= 3601
 send(receiver)
 check("an alert is sent again after an hour", len(posted) == 2 * n)
-R.ALERT_CFG = {k: v for k, v in R.ALERT_CFG.items() if k != "webhook_url"}
+
+# Alerts are deduped by a stable key per rule and subject, not by their text,
+# which embeds counts that move.
+keys = [x["key"] for x in R.aggregate_audit()["alerts"]]
+check("every alert has a key, and the keys are unique within one evaluation",
+      len(keys) >= 4 and len(set(keys)) == len(keys)
+      and {"partial", "device_tokens:ci-box", "expensive_model:laptop / claude-opus-5",
+           "token_refused:a", "util_5h:a"} <= set(keys))
+with R.AUDIT_PATH.open("a") as f:
+    f.write(json.dumps(with_status(now - 5, "a", 401)) + "\n")
+    f.write(json.dumps(rec(now - 4, "ci-box", "claude-sonnet-5", "b", inp=1000)) + "\n")
+changed = [x["text"] for x in R.aggregate_audit()["alerts"]]
+check("the 401 count and the token total changed in the alert texts",
+      any("(401) 3 times" in t for t in changed) and any("6,001,010" in t for t in changed))
+m = len(posted)
+send(receiver)
+check("a changed count inside the hour posts nothing", len(posted) == m)
+with R.AUDIT_PATH.open("a") as f:
+    f.write(json.dumps(with_status(now - 3, "b", 401)) + "\n")
+send(receiver)
+check("a 401 for a second account posts exactly one new alert, for that account",
+      len(posted) == m + 1 and posted[-1]["text"].startswith("b: upstream refused its token"))
+m = len(posted)
+for k in R.ALERT_SENT:
+    R.ALERT_SENT[k] -= 3601
+send(receiver)
+check("after an hour the alerts post again, with the current count in the text",
+      len(posted) == m + len(keys) + 1
+      and any(p["text"].startswith("a: upstream refused its token (401) 3 times")
+              for p in posted[m:]))
+n = len(posted)  # the checks below count from here
+R.ALERT_CFG ={k: v for k, v in R.ALERT_CFG.items() if k != "webhook_url"}
 R.ALERT_SENT.clear()
 send(receiver)
-check("with no webhook_url nothing is sent", len(posted) == 2 * n)
+check("with no webhook_url nothing is sent", len(posted) == n)
 
-# Only the 401 alert is left active, so one failure prints one warning. The
-# unparsable audit line above set the partial-history alert; clear it.
+# Only the 401 alerts (one per refused account) are left active, so each failed
+# POST prints one warning. The unparsable audit line above set the
+# partial-history alert; clear it.
 R._AUDIT_CACHE["limited_until"] = 0
 R.ALERT_CFG = {"device_tokens_per_hour": 10**12, "expensive_model_patterns": [],
                "util_warn": 2.0, "webhook_url": HOOK}
+N_ACTIVE = len(R.aggregate_audit()["alerts"])
 
 
 def timing_out(request):
@@ -187,7 +220,7 @@ for name, handler in (("a 500", lambda request: httpx.Response(500)), ("a timeou
     R.ALERT_SENT.clear()
     err = send(handler)
     check(f"{name} prints one warning without the URL and does not raise",
-          err.count("warning: alert webhook failed") == 1 and "secret-path" not in err)
+          err.count("warning: alert webhook failed") == N_ACTIVE and "secret-path" not in err)
     check(f"{name} is not retried within the hour", send(handler) == "")
 
 devs = agg["devices"]
