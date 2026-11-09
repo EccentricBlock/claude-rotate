@@ -160,8 +160,6 @@ if priv:
     owners = priv.split(",")
     acct["private_to"] = owners[0] if len(owners) == 1 else owners
     acct.setdefault("priority", 1)  # written out, so the owners spend it first
-else:
-    acct.pop("private_to", None)
 path = os.path.realpath("config.json")
 with open(path + ".tmp", "w") as f:
     json.dump(cfg, f, indent=2)

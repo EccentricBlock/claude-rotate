@@ -615,7 +615,11 @@ Set it in `config.json`, or with the CLI:
 sudo claude-rotate-admin add-token max-20x --private-to kamal-mbp,kamal-mini   # Debian service
 ```
 
-Both take one device or a comma-separated list. `claude-rotate-admin remove-user`
+Both take one device or a comma-separated list. Renewing a token without
+`--private-to` keeps the account's `private_to`; to make an account shared
+again, delete `private_to` from `config.json` (on the Debian service,
+`claude-rotate-admin set-account NAME --shared` will do it once it lands).
+`claude-rotate-admin remove-user`
 takes a device out of every `private_to` list that has other owners, and refuses
 a device that is the only owner of an account.
 

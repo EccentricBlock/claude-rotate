@@ -89,6 +89,19 @@ def main():
         accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
         assert accounts["priv-account"]["private_to"] == ["Alice_01-laptop", "alice-desktop"]
 
+        # Renewing a private account's token without --private-to keeps it private.
+        assert run("add-device", "d2").returncode == 0
+        assert run("add-account", "renewed", "--private-to", "Alice_01-laptop", input="sk-ant-oat01-first\n").returncode == 0
+        assert run("add-account", "renewed", input="sk-ant-oat01-second\n").returncode == 0
+        accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
+        assert accounts["renewed"]["private_to"] == "Alice_01-laptop"
+        assert accounts["renewed"]["priority"] == 1
+        assert (root / "tokens/renewed.token").read_text() == "sk-ant-oat01-second"
+        # The flag still overrides the stored owners.
+        assert run("add-account", "renewed", "--private-to", "Alice_01-laptop,d2", input="sk-ant-oat01-third\n").returncode == 0
+        accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
+        assert accounts["renewed"]["private_to"] == ["Alice_01-laptop", "d2"]
+
         # Config and tokens are written then renamed; no temporary file is left behind.
         assert not (root / "config.json.tmp").exists()
         assert not list((root / "tokens").glob(".*.tmp"))
