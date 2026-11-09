@@ -116,6 +116,7 @@ validate, or does not answer, it says `NOT live` and exits 2.
 | Add an account, or replace an existing account's token | `sudo claude-rotate-admin add-token NAME` |
 | Add an account reserved for one or more devices (comma list), written with priority 1 | `sudo claude-rotate-admin add-token NAME --private-to DEVICE[,DEVICE...]` |
 | Change an account's settings, any of `--disable`/`--enable`, `--priority N`, `--weight X`, `--weekly-cap F`/`--no-weekly-cap`, `--weekly-pacing`/`--no-weekly-pacing`, `--pace-lookahead 12h`/`--no-pace-lookahead`, `--private-to DEVICE[,DEVICE...]`/`--shared` (`--shared` leaves the `priority: 1` that `--private-to` wrote; `--priority 100` undoes it) | `sudo claude-rotate-admin set-account NAME --FLAG ...` |
+| Manage accounts from a numbered prompt menu (select, add, change settings, replace token, make active, remove); answers are read one line at a time from stdin | `sudo claude-rotate-admin menu` |
 | Add a device and print its two `export` lines | `sudo claude-rotate-admin add-user NAME` |
 | Revoke a device (refused while it is the only owner of a private account) | `sudo claude-rotate-admin remove-user NAME` |
 | Remove an account and delete its token file | `sudo claude-rotate-admin remove-token NAME` |

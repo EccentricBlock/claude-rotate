@@ -707,6 +707,60 @@ def test_set_account(f):
     assert "weight 1, weekly_cap none, weekly_pacing off, pace_lookahead default, private_to none" in human
 
 
+def test_menu(f):
+    assert f.run("add-token", "mn", "--no-restart", input=TOKEN + "\n").returncode == 0
+    f.set_active(False)
+
+    def acct(name):
+        return next((a for a in f.cfg()["accounts"] if a["name"] == name), None)
+
+    # Select mn, change a setting, disable; the reprinted table shows it; quit exits 0.
+    r = f.run("menu", input="1\nmn\n1\n1\n3\n")
+    assert r.returncode == 0, r
+    assert acct("mn")["disabled"] is True
+    assert "mn: active no, disabled yes" in r.stdout and "mn: active no, disabled no" in r.stdout, r.stdout
+    assert mode(f.config) == 0o640
+    # An invalid value prints the refusal set-account prints, changes nothing, and returns to the menu.
+    before = f.config.read_bytes()
+    flag = f.run("set-account", "mn", "--weekly-cap", "1.5", "--no-restart")
+    r = f.run("menu", input="1\nmn\n1\n5\n1.5\n3\n")
+    assert r.returncode == 0 and f.config.read_bytes() == before, r
+    assert flag.returncode == 1 and flag.stderr.strip() in r.stderr, (flag, r)
+    # A valid value goes through the shared code.
+    r = f.run("menu", input="1\nmn\n1\n5\n0.5\n3\n")
+    assert r.returncode == 0 and acct("mn")["weekly_cap"] == 0.5, r
+    # Remove with a wrong name changes nothing; with the right name the account and token are gone.
+    before = f.config.read_bytes()
+    r = f.run("menu", input="1\nmn\n4\nnope\n3\n")
+    assert r.returncode == 0 and f.config.read_bytes() == before and (f.tokens / "mn.token").exists(), r
+    assert "not confirmed" in r.stdout
+    r = f.run("menu", input="1\nmn\n4\nmn\n3\n")
+    assert r.returncode == 0 and acct("mn") is None and not (f.tokens / "mn.token").exists(), r
+    # Add an account with a piped token, then select it and disable it: later answers are still read.
+    r = f.run("menu", input="2\nc\nsk-ant-oat01-ci-dummy-token\n1\nc\n1\n1\n3\n")
+    assert r.returncode == 0, r
+    assert (f.tokens / "c.token").read_text().strip() == "sk-ant-oat01-ci-dummy-token"
+    assert acct("c")["disabled"] is True
+    # A token without the prefix prints read_token's refusal and writes nothing.
+    before = f.config.read_bytes()
+    r = f.run("menu", input="2\nd\nnot-a-token\n3\n")
+    assert r.returncode == 0 and "token should start with sk-ant-oat01-; nothing stored" in r.stderr, r
+    assert f.config.read_bytes() == before and not (f.tokens / "d.token").exists()
+    # Replace a token through the menu.
+    r = f.run("menu", input="1\nc\n2\nsk-ant-oat01-replaced\n3\n")
+    assert r.returncode == 0 and (f.tokens / "c.token").read_text().strip() == "sk-ant-oat01-replaced", r
+    # End of input at the main menu quits like quit; inside an action it abandons it and exits 1.
+    assert f.run("menu", input="").returncode == 0
+    before = f.config.read_bytes()
+    r = f.run("menu", input="2\ne\n")
+    assert r.returncode == 1 and "end of input; nothing changed" in r.stderr, r
+    assert f.config.read_bytes() == before and not (f.tokens / "e.token").exists()
+    # Clean up for the tests after this one, and a bare run still prints usage.
+    assert f.run("remove-token", "c", "--no-restart").returncode == 0
+    r = f.run()
+    assert r.returncode == 1 and "usage" in r.stdout.lower(), r
+
+
 def main():
     f = Fixture()
     order = ["test_init_creates_empty_config_and_modes", "test_invalid_names_do_nothing",
@@ -717,7 +771,7 @@ def main():
              "test_reload_is_confirmed_through_status",
              "test_rotate_rejections_do_not_mutate", "test_rotate_switches_after_stop_and_preserves_state",
              "test_remove_token_and_setup_needed", "test_set_url_and_symlinked_config",
-             "test_set_account"]
+             "test_set_account", "test_menu"]
     tests = [(n, globals()[n]) for n in order]  # the fixture is built up step by step
     assert sorted(order) == sorted(n for n, g in globals().items() if n.startswith("test_") and callable(g))
     try:

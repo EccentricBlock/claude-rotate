@@ -591,6 +591,11 @@ def read_token(args) -> str:
         data = getpass.getpass("Paste the sk-ant-oat01-... token here (input hidden): ")
     else:
         data = sys.stdin.read()
+    return check_token(data)
+
+
+def check_token(data: str) -> str:
+    """The stripped token, or a refusal when it is empty, lacks the prefix or has whitespace."""
     token = data.strip()
     if not token:
         raise Refused("no token given (stdin was empty)")
@@ -608,13 +613,21 @@ def set_private(acct: dict, devices: list) -> None:
     acct.setdefault("priority", 1)
 
 
-def cmd_add_token(args) -> int:
+def validate_add_args(args):
     validate_name(args.name, "account name")
     for device in args.private_to or []:
         validate_name(device, "device name")
     if len(set(args.private_to or [])) != len(args.private_to or []):
         raise Refused("--private-to lists a device twice")
-    token = read_token(args)
+
+
+def cmd_add_token(args) -> int:
+    validate_add_args(args)
+    return store_token(args, read_token(args))
+
+
+def store_token(args, token: str) -> int:
+    """Store a checked token for args.name: the part of add-token after the token is read."""
     uid, gid = owner_uid(), service_ids()[1]
     with AdminLock():
         check_fixed_tree()
@@ -1109,6 +1122,171 @@ def cmd_status(args) -> int:
     return EXIT_OK
 
 
+# ---------------------------------------------------------------- menu
+
+
+class EndOfInput(Exception):
+    """stdin ended while the menu was waiting for an answer."""
+
+
+SET_ACCOUNT_DEFAULTS = dict(disable=False, enable=False, priority=None, weight=None, weekly_cap=None,
+                            no_weekly_cap=False, weekly_pacing=False, no_weekly_pacing=False,
+                            pace_lookahead=None, no_pace_lookahead=False, private_to=None, shared=False,
+                            no_restart=False)
+
+
+def ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        raise EndOfInput from None
+
+
+def ask_token() -> str:
+    """One token, checked. A pipe gives one line, so later answers stay in the input."""
+    if sys.stdin.isatty():
+        out("Run `claude setup-token` in a browser session logged into that account.")
+        data = getpass.getpass("Paste the sk-ant-oat01-... token here (input hidden): ")
+    else:
+        data = sys.stdin.readline()
+        if not data:
+            raise EndOfInput
+    return check_token(data)
+
+
+def print_account_table(report: dict):
+    if "config_error" in report:
+        out(f"config: ERROR {report['config_error']}")
+        return
+    accounts = report["accounts"]
+    out(f"accounts ({len(accounts)}):" if accounts else "no accounts configured")
+    for number, acct in enumerate(accounts, 1):
+        private = acct["private_to"]
+        private = ",".join(private) if isinstance(private, list) else private
+        out(f"  {number}. {acct['name']}: active {'yes' if acct['name'] == report['active_account'] else 'no'}, "
+            f"disabled {'yes' if acct['disabled'] else 'no'}, priority {acct['priority']}, "
+            f"weight {acct['weight']}, "
+            f"weekly_cap {acct['weekly_cap'] if acct['weekly_cap'] is not None else 'none'}, "
+            f"weekly_pacing {'on' if acct['weekly_pacing'] else 'off'}, "
+            f"pace_lookahead {acct['pace_lookahead'] or 'default'}, private_to {private or 'none'}, "
+            f"5h {acct['util_5h']:.0%}, 7d {acct['util_7d']:.0%}, "
+            f"token file {'present' if acct['token_file_present'] else 'MISSING'}")
+
+
+def choose(title: str, options: list):
+    """Print numbered options, read a number, and return that option's index or None."""
+    out(title)
+    for number, label in enumerate(options, 1):
+        out(f"  {number}) {label}")
+    answer = ask("choice: ")
+    if answer.isdigit() and 1 <= int(answer) <= len(options):
+        return int(answer) - 1
+    out(f"'{answer}' is not one of the choices")
+    return None
+
+
+def confirm_by_name(name: str, what: str) -> bool:
+    if ask(f"{what} account '{name}'? Type its name to confirm: ") == name:
+        return True
+    out("not confirmed; nothing changed")
+    return False
+
+
+def menu_set_account(name: str):
+    labels = ["disable", "enable", "priority", "weight", "weekly cap", "weekly pacing", "pace lookahead",
+              "private to", "back"]
+    index = choose(f"settings for '{name}':", labels)
+    if index is None or labels[index] == "back":
+        return
+    label, changes = labels[index], {}
+    if label in ("disable", "enable"):
+        changes[label] = True
+    elif label == "priority":
+        changes["priority"] = ask("priority (an integer, 100 is the default): ")
+    elif label == "weight":
+        changes["weight"] = ask("weight (a number > 0, 1 is the default): ")
+    elif label == "weekly cap":
+        value = ask("weekly cap (0 to 1, or none): ")
+        if value == "none":
+            changes["no_weekly_cap"] = True
+        else:
+            changes["weekly_cap"] = value
+    elif label == "weekly pacing":
+        value = ask("weekly pacing (on or off): ")
+        if value not in ("on", "off"):
+            raise Refused("weekly pacing must be on or off; nothing changed")
+        changes["weekly_pacing" if value == "on" else "no_weekly_pacing"] = True
+    elif label == "pace lookahead":
+        value = ask("pace lookahead (an integer and one unit m, h or d, or none): ")
+        if value == "none":
+            changes["no_pace_lookahead"] = True
+        else:
+            changes["pace_lookahead"] = value
+    else:
+        value = ask("devices, comma separated, or shared: ")
+        if value == "shared":
+            changes["shared"] = True
+        else:
+            changes["private_to"] = [d.strip() for d in value.split(",")]
+    cmd_set_account(argparse.Namespace(name=name, **{**SET_ACCOUNT_DEFAULTS, **changes}))
+
+
+def menu_account(name: str):
+    labels = ["change a setting", "replace token", "make active (rotate)", "remove", "back"]
+    index = choose(f"account '{name}':", labels)
+    if index == 0:
+        menu_set_account(name)
+    elif index == 1:
+        args = argparse.Namespace(name=name, private_to=None, token_file=None, no_restart=False)
+        validate_add_args(args)
+        store_token(args, ask_token())
+    elif index == 2:
+        if confirm_by_name(name, "make active"):
+            cmd_rotate(argparse.Namespace(account=name))
+    elif index == 3:
+        if confirm_by_name(name, "remove"):
+            cmd_remove_token(argparse.Namespace(name=name, no_restart=False))
+
+
+def menu_action(index: int, report: dict):
+    if index == 0:
+        names = [a["name"] for a in report.get("accounts", [])]
+        answer = ask("account name or number: ")
+        if answer.isdigit() and answer not in names and 1 <= int(answer) <= len(names):
+            answer = names[int(answer) - 1]
+        if answer not in names:
+            raise Refused(f"account '{answer}' does not exist; nothing changed")
+        menu_account(answer)
+    elif index == 1:
+        args = argparse.Namespace(name=ask("new account name: "), private_to=None, token_file=None,
+                                  no_restart=False)
+        validate_add_args(args)
+        store_token(args, ask_token())
+
+
+def cmd_menu(args) -> int:
+    """Prompt-driven menu over the flag commands. EOF at the main prompt quits; EOF
+    inside an action abandons it and exits 1."""
+    while True:
+        report = collect_status()
+        print_account_table(report)
+        try:
+            index = choose("main menu:", ["select an account", "add account", "quit"])
+        except EndOfInput:
+            return EXIT_OK
+        if index == 2:
+            return EXIT_OK
+        if index is None:
+            continue
+        try:
+            menu_action(index, report)
+        except Refused as exc:
+            err(f"error: {exc}")
+        except EndOfInput:
+            err("end of input; nothing changed")
+            return EXIT_REFUSED
+
+
 # ---------------------------------------------------------------- entry point
 
 
@@ -1172,6 +1350,7 @@ def build_parser():
                    help="remove private_to; priority stays as it is, so --priority 100 undoes the priority 1 "
                         "that --private-to wrote")
     p.add_argument("--no-restart", action="store_true", help="store only; do not signal the service (it still polls for changes)")
+    add("menu", cmd_menu, "interactive menu over the account commands (answers read from stdin)")
     add("set-url", cmd_set_url, "set public_url used in the add-user instructions").add_argument("url", metavar="URL")
     add("rotate", cmd_rotate, "make another account active (next eligible, or ACCOUNT); restarts the service").add_argument(
         "account", nargs="?", metavar="ACCOUNT")
