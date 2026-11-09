@@ -216,6 +216,26 @@ def test_feed_bytes_still_replaces_invalid_bytes():
     tr.tail()                                  # flushing the decoder is safe
 
 
+def test_non_json_data_line_is_skipped_and_later_events_still_translate():
+    tr = SseToOai()
+    first = {"type": "content_block_delta",
+             "delta": {"type": "text_delta", "text": "one "}}
+    second = {"type": "content_block_delta",
+              "delta": {"type": "text_delta", "text": "two"}}
+    got = tr.feed(_data(first) + "data: {not json\n\n" + _data(second))
+    chunks = _parse_chunks(got)
+    assert not any("error" in c for c in chunks)
+    assert [c["choices"][0]["delta"]["content"] for c in chunks] == ["one ", "two"]
+    assert tr.errored is False
+
+
+def test_stop_array_of_strings_passes_through_unchanged():
+    body, err = oai_to_anthropic({"messages": [{"role": "user", "content": "x"}],
+                                  "stop": ["a", "b"]})
+    assert err is None
+    assert body["stop_sequences"] == ["a", "b"]
+
+
 if __name__ == "__main__":
     import sys as _sys
     fns = [(n, f) for n, f in sorted(globals().items())
