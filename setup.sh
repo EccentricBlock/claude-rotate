@@ -141,7 +141,12 @@ add-account)
     echo "Run 'claude setup-token' in a browser session logged into that account,"
     read -r -s -p "then paste the sk-ant-oat01-... token here (input hidden): " token
     echo
+    # A paste from a CRLF source keeps its carriage return; drop it and any
+    # trailing blanks before the checks.
+    token="${token%$'\r'}"
+    token="${token%"${token##*[![:blank:]]}"}"
     case "$token" in sk-ant-oat01-*) ;; *) echo "error: token should start with sk-ant-oat01-" >&2; exit 1;; esac
+    case "$token" in *[[:space:][:cntrl:]]*) echo "error: token contains whitespace or non-printable characters; nothing stored" >&2; exit 1;; esac
     # Write, then rename: a running proxy that notices the change must never
     # read an empty or half-written token.
     tmp="tokens/.${name}.token.tmp"

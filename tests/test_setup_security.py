@@ -102,6 +102,20 @@ def main():
         accounts = {a["name"]: a for a in json.loads(cfg_path.read_text())["accounts"]}
         assert accounts["renewed"]["private_to"] == ["Alice_01-laptop", "d2"]
 
+        # A CRLF paste is stored without its carriage return.
+        assert run("add-account", "a", input="sk-ant-oat01-dummy-test\r\n").returncode == 0
+        assert (root / "tokens/a.token").read_bytes() == b"sk-ant-oat01-dummy-test"
+        # Whitespace or a control character inside the token is refused before anything is written.
+        before = cfg_path.read_bytes()
+        for bad in ("sk-ant-oat01-dummy test\n", "sk-ant-oat01-dummy\x01test\n"):
+            result = run("add-account", "b", input=bad)
+            assert result.returncode == 1, bad
+            assert ("error: token contains whitespace or non-printable characters; nothing stored"
+                    in result.stderr), result.stderr
+            assert cfg_path.read_bytes() == before, bad
+            assert not (root / "tokens/b.token").exists(), bad
+            assert not (root / "tokens/.b.token.tmp").exists(), bad
+
         # Config and tokens are written then renamed; no temporary file is left behind.
         assert not (root / "config.json.tmp").exists()
         assert not list((root / "tokens").glob(".*.tmp"))
