@@ -313,6 +313,29 @@ check("status: paced allowance is the cap ramped through the week",
 acct = status_for(weekly_pacing=True)
 check("status: pacing without a cap gives a null cap and a ramped allowance",
       acct["weekly_cap"] is None and acct["weekly_pacing"] is True and acct["weekly_allowance"] == 0.2143)
+_bad_s, _bad_max = R.BAD_RECOVER_S, R.BAD_RECOVER_MAX_S
+R.BAD_RECOVER_S, R.BAD_RECOVER_MAX_S = 1200, 86400
+try:
+    fresh_state(accounts={"a": {"bad_status": 403, "last_bad_seen": time.time() - 600, "bad_count": 1}})
+    acct = status_for()
+    check("status: a bad account shows the minutes left of its recovery wait",
+          acct["account_bad"] is True and acct["bad_recover_in_min"] == 10)
+    fresh_state(accounts={"a": {"bad_status": 403, "last_bad_seen": time.time() - 1180, "bad_count": 1}})
+    acct = status_for()
+    check("status: the minutes left bottom out at 0 as the wait ends",
+          acct["account_bad"] is True and acct["bad_recover_in_min"] == 0)
+    fresh_state(accounts={"a": {"bad_status": 403, "last_bad_seen": time.time() - 1300, "bad_count": 1}})
+    acct = status_for()
+    check("status: once the wait has passed the account is no longer bad, with no countdown",
+          acct["account_bad"] is False and "bad_recover_in_min" not in acct)
+    R.BAD_RECOVER_S = 0
+    fresh_state(accounts={"a": {"bad_status": 403, "last_bad_seen": time.time() - 99999, "bad_count": 1}})
+    acct = status_for()
+    check("status: with bad_recover_s 0 a bad account shows no countdown",
+          acct["account_bad"] is True and "bad_recover_in_min" not in acct)
+finally:
+    R.BAD_RECOVER_S, R.BAD_RECOVER_MAX_S = _bad_s, _bad_max
+fresh_state()
 fresh_state()
 check("status auth via ?key=",call(path="/rotate/status?key=devkey-1", key=None,
                                     method="GET").status_code == 200)

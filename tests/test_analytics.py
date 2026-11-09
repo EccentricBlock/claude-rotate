@@ -258,6 +258,31 @@ out = R.weekly_outlook(now)
 check("rate ignores time at the limit: 100 points in the 10 h with quota left",
       out["rate_per_day"] == 240.0 and abs(out["eta"] - now) <= 1 and out["back_account"] == "a")
 
+# flat usage over the last 24 h: no rate, so a note and no projection
+R.HISTORY = [{"ts": now - 20 * H, "accounts": {"a": [0.40, now + 5 * H], "b": [0.40, rb]}},
+             {"ts": now - 10 * H, "accounts": {"a": [0.40, now + 5 * H], "b": [0.40, rb]}}]
+R.STATE = {"active_account": "a", "events": [], "accounts": {
+    "a": {"util_7d": 0.4, "reset_7d": now + 5 * H}, "b": {"util_7d": 0.4, "reset_7d": rb}}}
+out = R.weekly_outlook(now)
+check("flat weekly usage: the note says it did not rise, with no projection or ETA",
+      out["note"] == "weekly usage did not rise over the last 24 h"
+      and out["rate_per_day"] == 0.0 and out["projection"] == [] and out["eta"] is None)
+
+# a weekly reset already past is rolled forward by 7 days before the forecast
+past = now - 5 * H
+R.HISTORY = [{"ts": now - 20 * H, "accounts": {"a": [0.50, past], "b": [0.50, rb]}},
+             {"ts": now - 10 * H, "accounts": {"a": [1.00, past], "b": [1.00, rb]}}]
+R.STATE = {"active_account": "a", "events": [], "accounts": {
+    "a": {"util_7d": 1.0, "reset_7d": past}, "b": {"util_7d": 1.0, "reset_7d": rb}}}
+out = R.weekly_outlook(now)
+check("a past weekly reset is rolled forward 7 days: it is the one used as the quota return",
+      out["back_account"] == "b" and abs(out["back"] - rb) <= 1)
+R.STATE["accounts"]["b"]["reset_7d"] = now + 9 * 86400
+R.HISTORY[0]["accounts"]["b"][1] = R.HISTORY[1]["accounts"]["b"][1] = now + 9 * 86400
+out = R.weekly_outlook(now)
+check("the rolled reset (past + 7 days) is the soonest return, within 1 s",
+      out["back_account"] == "a" and abs(out["back"] - (past + 7 * 86400)) <= 1)
+
 R.HISTORY = []
 check("no rate without an hour of history", R.weekly_outlook(now)["eta"] is None
       and "not enough history" in R.weekly_outlook(now)["note"])

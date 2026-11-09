@@ -740,6 +740,41 @@ run(R.note_response("a", headers(), 200))
 check("200 clears the mark and the backoff",
       not any(k in R.STATE["accounts"]["a"] for k in R.BAD_KEYS) and not R.on_probation("a"))
 
+# 14c. reverting a refused request restores a probation account's earlier mark
+# (not a pop), and still clears the mark of an account that was healthy before.
+fresh_state("a")
+t = time.time()
+R.STATE["accounts"] = {
+    "a": {"bad_status": 404, "last_bad_seen": t, "bad_count": 3},  # re-marked by the request
+    "b": {"bad_status": 404, "last_bad_seen": t, "bad_count": 1},
+    "c": {}}
+prior_a = {"bad_status": 403, "last_bad_seen": t - 5000, "bad_count": 2}
+run(R.revert_refusals({"a": prior_a, "b": {k: None for k in R.BAD_KEYS}}, "a", 404))
+check("revert restores the prior bad_status of a probation account",
+      R.STATE["accounts"]["a"]["bad_status"] == 403)
+check("revert restores the prior last_bad_seen and bad_count",
+      R.STATE["accounts"]["a"]["last_bad_seen"] == t - 5000
+      and R.STATE["accounts"]["a"]["bad_count"] == 2)
+check("revert pops the marks of an account that was healthy before",
+      not any(k in R.STATE["accounts"]["b"] for k in R.BAD_KEYS))
+check("revert logs a refusal event naming both accounts",
+      R.STATE["events"][-1]["type"] == "refusal" and "a, b" in R.STATE["events"][-1]["reason"])
+
+# 14d. bad_recover_s 0 means a bad mark holds forever.
+R.BAD_RECOVER_S = 0
+fresh_state("c")
+t0 = time.time()
+R.STATE["accounts"] = {"a": {"bad_status": 403, "last_bad_seen": t0, "bad_count": 1},
+                       "b": {}, "c": {}}
+check("bad_recover_s 0: the recovery wait is 0", R.bad_recover_wait("a") == 0)
+_real_t = time.time
+time.time = lambda: t0 + 3600
+try:
+    check("bad_recover_s 0: still bad an hour after the mark", R.account_bad("a"))
+finally:
+    time.time = _real_t
+R.BAD_RECOVER_S = 600
+
 # 15. pick_account with every account disabled must not crash, and returns None
 # (the proxy answers 503 "no enabled accounts" instead of using a benched account).
 fresh_state("a")
