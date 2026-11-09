@@ -893,6 +893,7 @@ those taken from other forks.
 **Service and deployment**
 
 - Added hot config reload: `config.json` and the token files are reloaded when they change (polled every `reload_poll_s`) or on `SIGHUP`, an invalid file keeps the running config and is reported in `/rotate/status`, and `setup.sh` and `claude-rotate-admin` reload the service instead of restarting it ([4cf2fce](https://github.com/mrglrlgrlgrl/claude-rotate/commit/4cf2fce), [ca5344c](https://github.com/mrglrlgrlgrl/claude-rotate/commit/ca5344c), [19f8a27](https://github.com/mrglrlgrlgrl/claude-rotate/commit/19f8a27)).
+- Added `claude-rotate-admin set-account NAME`, which changes an account's `disabled`, `priority`, `weight`, `weekly_cap`, `weekly_pacing`, `pace_lookahead` and `private_to` without editing `config.json`, and `status` shows them ([280d62b](https://github.com/mrglrlgrlgrl/claude-rotate/commit/280d62b)).
 - Added `CLAUDE_ROTATE_BIND`, which overrides `bind` ([35f4624](https://github.com/mrglrlgrlgrl/claude-rotate/commit/35f4624)).
 - Added a Docker image and compose example, published to GHCR for amd64 and arm64 ([fdcff28](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fdcff28), [35da23e](https://github.com/mrglrlgrlgrl/claude-rotate/commit/35da23e)).
 - Changed publishing: a push to `main` publishes only `edge` and `sha-<short>`, and a `vX.Y.Z` tag publishes `X.Y.Z`, `X.Y` and `latest`, skipping the test matrix when `main` already built that commit green ([ffd6acc](https://github.com/mrglrlgrlgrl/claude-rotate/commit/ffd6acc)).
