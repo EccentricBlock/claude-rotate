@@ -916,6 +916,8 @@ those taken from other forks.
 
 **Panel**
 
+- Warned in the panel when upstream refused an account's token with a 401 in the last hour ([bc51277](https://github.com/mrglrlgrlgrl/claude-rotate/commit/bc51277)).
+- Posted the panel's alerts to an optional `alerts.webhook_url`, each at most once an hour ([5f664ff](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5f664ff)).
 - Showed the exact reset time of each usage window on hover in the panel, in the browser's time zone and in UTC ([7ef60c0](https://github.com/mrglrlgrlgrl/claude-rotate/commit/7ef60c0)).
 - Showed each account's weekly cap or paced allowance as a badge in the panel, and added `weekly_cap`, `weekly_pacing` and `weekly_allowance` to `/rotate/status` ([32b5221](https://github.com/mrglrlgrlgrl/claude-rotate/commit/32b5221)).
 - Kept the panel key across a page reload: the panel stores the `?key=` value in the tab's `sessionStorage` before it strips it from the address bar, `/rotate/panel` serves its static page without a key, and a 401 from `/rotate/status` shows a banner and forgets the key ([2bd5321](https://github.com/mrglrlgrlgrl/claude-rotate/commit/2bd5321)).
