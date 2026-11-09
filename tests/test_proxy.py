@@ -467,4 +467,138 @@ check("panel_tailnet: the header never opens the proxy itself",
       call(key=None, headers=ts).status_code == 401)
 R.PANEL_TAILNET = False
 
+# --- 11. /v1/chat/completions end to end -------------------------------------
+OAI_BODY = {"model": "claude-sonnet-5", "messages": [{"role": "user", "content": "hi"}]}
+real_note = R.note_response
+noted_calls = []
+
+
+async def spy_note(account, headers, status, **kw):
+    noted_calls.append((account, status))
+    return await real_note(account, headers, status, **kw)
+
+
+R.note_response = spy_note
+
+
+def sse_events(*texts):
+    out = ('data: {"type":"message_start","message":{"id":"msg_7","model":"claude-sonnet-5",'
+           '"usage":{"input_tokens":12,"cache_read_input_tokens":3}}}\n\n')
+    for t in texts:
+        out += ('data: ' + json.dumps({"type": "content_block_delta",
+                                       "delta": {"type": "text_delta", "text": t}}) + '\n\n')
+    return out + ('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},'
+                  '"usage":{"output_tokens":7}}\n\ndata: {"type":"message_stop"}\n\n')
+
+
+# (1) no valid device key
+fresh_state()
+use_upstream(lambda req: httpx.Response(200))
+r = call("/v1/chat/completions", key="wrong-key", body=OAI_BODY)
+check("chat: unknown device key → 401 authentication_error",
+      r.status_code == 401 and r.json()["error"]["type"] == "authentication_error"
+      and "unknown device key" in r.json()["error"]["message"])
+
+# (2) every account spent → 503 + retry-after from earliest_relief
+now = time.time()
+fresh_state("a", {"a": {"util_5h": 1.0, "reset_5h": now + 100},
+                  "b": {"util_5h": 1.0, "reset_5h": now + 2000}})
+R.HOLD_MAX_S = 0
+use_upstream(lambda req: httpx.Response(
+    429, json={"error": "limit"},
+    headers=unified(u5="1.0", status="rejected",
+                    **{"anthropic-ratelimit-unified-5h-reset": str(now + 100)})))
+r = call("/v1/chat/completions", body=OAI_BODY)
+check("chat: spent accounts give 503 overloaded_error",
+      r.status_code == 503 and r.json()["error"]["type"] == "overloaded_error")
+check("chat: retry-after comes from earliest_relief",
+      95 <= int(r.headers["retry-after"]) <= 101
+      and f"retry in {r.headers['retry-after']}s" in r.json()["error"]["message"])
+check("chat: 503 carries the x-rotate and rate-limit headers",
+      r.headers["x-rotate-account"] == "a"
+      and r.headers["anthropic-ratelimit-unified-status"] == "rejected"
+      and r.headers["anthropic-ratelimit-unified-5h-utilization"] == "1.0")
+check("chat: the audit record has status 503",
+      audit_recs()[-1]["status"] == 503 and audit_recs()[-1]["path"] == "/v1/chat/completions")
+
+# (3) stream: true, answered as an SSE stream
+fresh_state()
+noted_calls.clear()
+closed = []
+
+
+class TrackedBody(ChunkedBody):
+    async def aclose(self):
+        closed.append(1)
+
+
+SSE_TEXT = sse_events("He", "llo ", "world")
+use_upstream(lambda req: httpx.Response(
+    200, stream=TrackedBody(SSE_TEXT[:60].encode(), SSE_TEXT[60:].encode()),
+    headers={**unified(u5="0.42"), "content-type": "text/event-stream"}))
+r = call("/v1/chat/completions", body={**OAI_BODY, "stream": True})
+data_lines = [l for l in r.text.splitlines() if l.startswith("data:")]
+chunks = [json.loads(l[5:]) for l in data_lines if l[5:].strip() != "[DONE]"]
+check("chat stream: 200 text/event-stream", r.status_code == 200
+      and "text/event-stream" in r.headers["content-type"])
+check("chat stream: delta text equals the upstream text",
+      "".join(c["choices"][0]["delta"].get("content", "")
+              for c in chunks if c["choices"]) == "Hello world")
+check("chat stream: the last chunk is data: [DONE]", data_lines[-1] == "data: [DONE]")
+check("chat stream: the upstream is closed", closed == [1])
+rec = audit_recs()[-1]
+check("chat stream: usage and util_5h are audited",
+      rec["usage"] == {"input_tokens": 12, "output_tokens": 7,
+                       "cache_read_input_tokens": 3, "cache_creation_input_tokens": 0}
+      and rec["util_5h"] == "0.42" and rec["status"] == 200)
+check("chat stream: note_response is called once, for the account",
+      noted_calls == [("a", 200)] and R.STATE["accounts"]["a"]["util_5h"] == 0.42)
+
+# (4) 200 JSON body converted to chat.completion
+fresh_state()
+noted_calls.clear()
+MSG = {"id": "msg_j", "model": "claude-sonnet-5", "stop_reason": "end_turn",
+       "content": [{"type": "text", "text": "hello json"}],
+       "usage": {"input_tokens": 10, "output_tokens": 5}}
+use_upstream(lambda req: httpx.Response(200, json=MSG, headers=unified(u5="0.31", u7="0.22")))
+r = call("/v1/chat/completions", body=OAI_BODY)
+check("chat json: converted by anthropic_to_oai",
+      r.status_code == 200 and r.json()["object"] == "chat.completion"
+      and r.json()["id"] == "msg_j"
+      and r.json()["choices"][0]["message"]["content"] == "hello json"
+      and r.json()["usage"] == {"prompt_tokens": 10, "completion_tokens": 5,
+                                "total_tokens": 15})
+rec = audit_recs()[-1]
+check("chat json: usage is summarised into the audit record",
+      rec["usage"] == {"input_tokens": 10, "output_tokens": 5,
+                       "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+      and rec["util_5h"] == "0.31" and rec["model"] == "claude-sonnet-5")
+check("chat json: note_response is called once, since the send did not note it",
+      noted_calls == [("a", 200)] and R.STATE["accounts"]["a"]["util_7d"] == 0.22)
+check("chat json: the forwarded rate-limit headers are echoed",
+      r.headers["x-rotate-account"] == "a"
+      and r.headers["anthropic-ratelimit-unified-5h-utilization"] == "0.31"
+      and r.headers["anthropic-ratelimit-unified-7d-utilization"] == "0.22"
+      and r.headers["anthropic-ratelimit-unified-status"] == "allowed"
+      and "anthropic-ratelimit-unified-5h-reset" in r.headers)
+
+# (5) non-200 reply becomes an api_error with the upstream status
+fresh_state()
+use_upstream(lambda req: httpx.Response(
+    500, json={"type": "error", "error": {"type": "api_error", "message": "boom inside"}},
+    headers=unified()))
+r = call("/v1/chat/completions", body=OAI_BODY)
+check("chat error: JSON error message is relayed with the upstream status",
+      r.status_code == 500 and r.json() == {"error": {"message": "upstream: boom inside",
+                                                      "type": "api_error"}})
+check("chat error: the audit record keeps the upstream status", audit_recs()[-1]["status"] == 500)
+fresh_state()
+page = "<html>" + "x" * 300
+use_upstream(lambda req: httpx.Response(502, content=page.encode(), headers=unified()))
+r = call("/v1/chat/completions", body=OAI_BODY)
+check("chat error: a non-JSON body gives its first 200 bytes",
+      r.status_code == 502 and r.json()["error"]["type"] == "api_error"
+      and r.json()["error"]["message"] == "upstream: " + page[:200])
+R.note_response = real_note
+
 print(f"\nall {PASS} checks passed")
