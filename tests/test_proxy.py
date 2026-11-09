@@ -64,13 +64,14 @@ def use_upstream(handler):
                                  base_url=R.UPSTREAM, timeout=30.0)
 
 
-def call(path="/v1/messages", key="devkey-1", body=None, headers=None, method="POST"):
+def call(path="/v1/messages", key="devkey-1", body=None, headers=None, method="POST", raw=None):
     async def _go():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=R.app),
                                      base_url="http://proxy", timeout=30.0) as ac:
             hdrs = {"authorization": f"Bearer {key}"} if key else {}
             hdrs.update(headers or {})
-            content = json.dumps(body or {"model": "claude-opus-5", "messages": []})
+            content = raw if raw is not None else json.dumps(
+                body or {"model": "claude-opus-5", "messages": []})
             return await ac.request(method, path, content=content, headers=hdrs)
     return asyncio.run(_go())
 
@@ -600,5 +601,81 @@ check("chat error: a non-JSON body gives its first 200 bytes",
       r.status_code == 502 and r.json()["error"]["type"] == "api_error"
       and r.json()["error"]["message"] == "upstream: " + page[:200])
 R.note_response = real_note
+
+# --- 12. transparent proxy: odd queries and bodies, odd upstream replies ------
+def raw_asgi(path, query, body=b"{}"):
+    """Drive the app with a raw query string; httpx would percent-encode it."""
+    sent = []
+
+    async def _go():
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                 "method": "POST", "scheme": "http", "path": path,
+                 "raw_path": path.encode(), "query_string": query,
+                 "headers": [(b"authorization", b"Bearer devkey-1")],
+                 "server": ("proxy", 80), "client": ("127.0.0.1", 1)}
+        pending = [{"type": "http.request", "body": body, "more_body": False}]
+
+        async def receive():
+            if pending:
+                return pending.pop(0)
+            await asyncio.Event().wait()  # the client stays connected
+
+        async def send(msg):
+            sent.append(msg)
+
+        await R.app(scope, receive, send)
+    asyncio.run(_go())
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    return status, b"".join(m.get("body", b"") for m in sent)
+
+
+# (1) a query string that is not percent-encoded ASCII
+fresh_state()
+reached = []
+use_upstream(lambda req: reached.append(req.url) or httpx.Response(200))
+status, content = raw_asgi("/v1/messages", "x=é".encode())
+check("raw non-ASCII query string → 400 with the percent-encoding detail",
+      status == 400 and json.loads(content) == {"detail": "query string must use percent-encoding"})
+check("...and the upstream was never called", reached == [])
+status, _ = raw_asgi("/v1/messages", b"x=%C3%A9")
+check("...while a percent-encoded query is forwarded", status == 200 and len(reached) == 1)
+
+# (2) a body that is not JSON, or nested too deeply, leaves model None
+for label, raw_body in (("not valid JSON", b"{not json"),
+                        ("nested too deeply", b"[" * 100000 + b"]" * 100000)):
+    fresh_state()
+    got = []
+    use_upstream(lambda req: got.append(req.content) or httpx.Response(
+        200, json={"usage": {"input_tokens": 1, "output_tokens": 1}}, headers=unified()))
+    r = call(raw=raw_body)
+    rec = audit_recs()[-1]
+    check(f"body {label}: model is None in the audit record", rec["model"] is None)
+    check(f"body {label}: still forwarded unchanged and answered 200",
+          r.status_code == 200 and rec["status"] == 200 and got == [raw_body])
+
+# (3) a non-JSON upstream body
+for label, upstream_body in (("text", b"plain text, not json"),
+                             ("bytes that are not UTF-8", b"\xff\xfe\x00 raw")):
+    fresh_state()
+    use_upstream(lambda req: httpx.Response(
+        200, content=upstream_body, headers={**unified(), "content-type": "text/plain"}))
+    r = call()
+    rec = audit_recs()[-1]
+    check(f"upstream {label}: relayed unchanged with its status",
+          r.status_code == 200 and r.content == upstream_body)
+    check(f"upstream {label}: no usage in the audit record", "usage" not in rec
+          and rec["status"] == 200)
+
+# (4) burst 429 pacing, read from the account's pace_until
+for label, hdrs, want in (("retry-after: soon", {"retry-after": "soon"}, 15),
+                          ("no retry-after", {}, 15),
+                          ("retry-after: 600", {"retry-after": "600"}, 60)):
+    fresh_state("a", {"a": {"util_5h": 0.3, "util_7d": 0.1}})
+    t0 = time.time()
+    verdict = asyncio.run(R.note_response(
+        "a", httpx.Headers({**unified(u5="0.3"), **hdrs}), 429))
+    pace_until = R.STATE["accounts"]["a"]["pace_until"]
+    check(f"burst 429 with {label}: verdict burst, paced {want} s",
+          verdict == "burst" and abs(pace_until - (t0 + want)) < 1)
 
 print(f"\nall {PASS} checks passed")
