@@ -50,6 +50,35 @@ def test_missing_token_file_is_skipped_not_fatal():
     assert [a["name"] for a in cfg["accounts"]] == ["a"]
 
 
+def test_no_token_file_at_all_refuses_startup():
+    try:
+        _load_with({"accounts": [{"name": "b", "token_file": "tokens/nope.token"},
+                                 {"name": "c", "token_file": "tokens/nada.token"}],
+                    "devices": {"laptop": "dev-laptop-a1b2c3"}})
+        raise AssertionError("no loadable account must refuse startup")
+    except R.ConfigError as error:
+        assert str(error).startswith("no accounts with tokens configured"), str(error)
+
+
+def test_resource_limit_override_must_be_an_integer():
+    var = "CLAUDE_ROTATE_MAX_INFLIGHT"
+    old = os.environ.get(var)
+    try:
+        os.environ[var] = "ten"
+        try:
+            R.resource_limit({}, "max_inflight", 5)
+            raise AssertionError("a non-integer override must be refused")
+        except R.ConfigError as error:
+            assert str(error) == "max_inflight must be an integer", str(error)
+        os.environ[var] = "7"
+        assert R.resource_limit({}, "max_inflight", 5) == 7
+    finally:
+        if old is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = old
+
+
 def test_empty_and_duplicate_device_keys_refuse_startup():
     for devices in ({"device": ""}, {"device": "   "}, {"device": None},
                     {"one": "same", "two": "same"}, None):

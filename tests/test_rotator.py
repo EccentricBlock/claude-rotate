@@ -775,6 +775,22 @@ finally:
     time.time = _real_t
 R.BAD_RECOVER_S = 600
 
+# 14e. load_state returns what save_state wrote, so rotation state survives a restart.
+import json
+import tempfile
+_real_state_path = R.STATE_PATH
+R.STATE_PATH = Path(tempfile.mkdtemp()) / "state.json"
+try:
+    saved = {"active_account": "b", "accounts": {"a": {"bad_status": 403, "bad_count": 2}, "b": {}},
+             "events": [{"type": "switch", "from": "a", "to": "b"}], "last_switch_ts": 1234.5}
+    R.STATE_PATH.write_text(json.dumps(saved))
+    check("load_state round-trips the stored state dict", R.load_state() == saved)
+    R.STATE_PATH.unlink()
+    check("load_state with no file starts on the first configured account",
+          R.load_state()["active_account"] == R.CFG["accounts"][0]["name"])
+finally:
+    R.STATE_PATH = _real_state_path
+
 # 15. pick_account with every account disabled must not crash, and returns None
 # (the proxy answers 503 "no enabled accounts" instead of using a benched account).
 fresh_state("a")

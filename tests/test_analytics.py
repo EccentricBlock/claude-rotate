@@ -297,6 +297,22 @@ R.record_history(now + 600)
 R.record_history(now + 1801)  # stored ts is rounded
 check("one sample per 30 min", len(R.HISTORY) == 2)
 
+# an unreadable or invalid history file is ignored with a warning naming it
+for label, content in (("invalid JSON", "{not json"), ("a non-UTF-8 file", b"\xff\xfe\x00")):
+    if isinstance(content, bytes):
+        R.HISTORY_PATH.write_bytes(content)
+    else:
+        R.HISTORY_PATH.write_text(content)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        got = R.load_history()
+    check(f"load_history on {label} returns [] and the warning names the file",
+          got == [] and str(R.HISTORY_PATH) in err.getvalue() and "warning" in err.getvalue())
+R.HISTORY_PATH.write_text('{"ts": 1}')
+check("load_history on JSON that is not a list returns []", R.load_history() == [])
+R.HISTORY_PATH.unlink()
+check("load_history with no file returns [] quietly", R.load_history() == [])
+
 # --- device/model totals: 7 d, 30 d, all time, trend; backfill from the audit logs ---
 import datetime as dt
 today = dt.date.today()

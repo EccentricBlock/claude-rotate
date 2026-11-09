@@ -5,7 +5,9 @@ auth, header rewriting, SSE relay, quota-429 rotate+retry, burst-429 pacing,
 429 passthrough when hold is off, hold-until-reset, and the admin endpoints.
 """
 import asyncio
+import contextlib
 import gzip
+import io
 import json
 import sys
 import tempfile
@@ -396,6 +398,31 @@ try:
 finally:
     del R.ACCOUNTS["b"]["disabled"]
 check("a disabled idle account gets no probe", probes == [])
+
+# a transport failure on one account's probe is reported and the next account still refreshes
+fresh_state(active="a", accounts={"a": {"last_seen": time.time() - 7200, "util_7d": 0.01},
+                                  "b": {"last_seen": time.time() - 7200, "util_7d": 0.01}})
+R._REFRESH_TRIED.clear()
+probes.clear()
+
+
+def failing_first(req):
+    probes.append(req.headers["authorization"])
+    if req.headers["authorization"] == "Bearer tok-a":
+        raise httpx.ConnectError("boom", request=req)
+    return httpx.Response(200, headers=unified(u5="0.14", u7="0.69"))
+
+
+use_upstream(failing_first)
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    asyncio.run(R.refresh_idle_accounts())
+check("a failed probe warns with the exception type and the account",
+      "usage refresh of a failed (ConnectError)" in err.getvalue())
+check("the next account is still probed after the failure",
+      probes == ["Bearer tok-a", "Bearer tok-b"])
+check("the next account's usage is refreshed; the failed one is untouched",
+      R.STATE["accounts"]["b"]["util_7d"] == 0.69 and R.STATE["accounts"]["a"]["util_7d"] == 0.01)
 
 # refresh_idle_s 0 = off. The guard lives in refresh_loop(), so drive one
 # iteration; the stubbed sleep ends the loop after it.
