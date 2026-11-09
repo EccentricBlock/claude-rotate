@@ -1339,6 +1339,7 @@ def aggregate_audit() -> dict:
     device_hour_reqs: dict = {}
     device_meta: dict = {}
     expensive_hour: dict = {}
+    refused_hour: dict = {}
 
     _tail_audit()
     records = _AUDIT_CACHE["records"]
@@ -1365,6 +1366,9 @@ def aggregate_audit() -> dict:
             device_hour_tokens[rec.get("device", "?")] = (
                 device_hour_tokens.get(rec.get("device", "?"), 0) + total)
             device_hour_reqs[dev] = device_hour_reqs.get(dev, 0) + 1
+            if rec.get("status") == 401:
+                acct = rec.get("account", "?")
+                refused_hour[acct] = refused_hour.get(acct, 0) + 1
             if any(p in (model or "") for p in ALERT_CFG["expensive_model_patterns"]):
                 key = f'{rec.get("device", "?")} / {model}'
                 expensive_hour[key] = expensive_hour.get(key, 0) + 1
@@ -1379,6 +1383,10 @@ def aggregate_audit() -> dict:
                                    f"(threshold {ALERT_CFG['device_tokens_per_hour']:,})"})
     for key, n in expensive_hour.items():
         alerts.append({"level": "info", "text": f"expensive model in use: {key} — {n} requests in the last hour"})
+    for acct, n in refused_hour.items():
+        alerts.append({"level": "warn",
+                       "text": f"{acct}: upstream refused its token (401) {n} times "
+                               "in the last hour; renew it with add-account/add-token"})
     for name in ACCOUNTS:
         u = utilization(name)
         if u >= ALERT_CFG["util_warn"]:

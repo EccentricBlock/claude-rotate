@@ -184,8 +184,8 @@ gauge moving.
   *active* session credential, not previously minted setup tokens.
 - Treat each token file as a year-long bearer credential for that Anthropic
   account (see [Security notes](#security-notes)). When a token dies early, the
-  proxy's upstream calls start returning 401 for that account; the proxy
-  raises no alert for this, so watch for 401s (see Troubleshooting).
+  proxy's upstream calls start returning 401 for that account; the panel
+  then shows a warning alert for it (see Troubleshooting).
 - Scope note: subscription OAuth tokens are for Claude Code traffic, which is
   all this proxy forwards, and per the 2026 docs they are rejected by the raw
   Messages API.
@@ -346,7 +346,9 @@ rate-limit headers:
   which reset brings quota back; tiles for weekly quota left, burn rate,
   requests in the last 24 h and the 7-day cost-equivalent. Alerts (device over
   N tokens/hour, expensive-model usage, account near the switch threshold;
-  thresholds in `config.json`) sit in a banner above it.
+  thresholds in `config.json`) sit in a banner above it. An account whose
+  token upstream refused with a 401 in the last hour also raises a warning
+  naming it; the proxy does not rotate away from it.
 - **Accounts**: live 5-hour and weekly meters (from Anthropic's own headers)
   with a tick at the switch threshold, reset countdowns, upstream status and
   the active account. Hover a reset countdown for the exact reset time in your

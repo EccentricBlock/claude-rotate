@@ -99,6 +99,27 @@ check("token/hour alert fires", "ci-box" in alert_texts and "6,000,010" in alert
 check("expensive-model alert fires", "laptop / claude-opus-5" in alert_texts)
 check("util warn alert fires", "a 5h window at 85%" in alert_texts)
 
+check("no token alert without a 401", "refused its token" not in alert_texts)
+
+
+def with_status(ts, account, status):
+    r = rec(ts, "laptop", "claude-haiku-4-5", account)
+    r["status"] = status
+    return r
+
+
+with R.AUDIT_PATH.open("a") as f:
+    for r in (with_status(now - 30, "a", 401), with_status(now - 20, "a", 401),
+              with_status(now - 7200, "b", 401), with_status(now - 10, "b", 403)):
+        f.write(json.dumps(r) + "\n")
+token_alerts = [x["text"] for x in R.aggregate_audit()["alerts"]
+                if "refused its token" in x["text"]]
+check("recent 401s give one warn alert naming the account, with the count",
+      token_alerts == ["a: upstream refused its token (401) 2 times in the last "
+                       "hour; renew it with add-account/add-token"])
+check("a 401 older than an hour and a 403 give none",
+      not any(t.startswith("b:") for t in token_alerts))
+
 devs = agg["devices"]
 check("roster covers idle device too", "idle-dev" in devs)
 check("recent device online", devs["laptop"]["online"] is True)
