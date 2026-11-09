@@ -626,6 +626,87 @@ def test_set_url_and_symlinked_config(f):
         f.config.write_bytes(real)
 
 
+def test_set_account(f):
+    assert f.run("add-token", "sa", "--no-restart", input=TOKEN + "\n").returncode == 0
+    assert f.run("add-user", "dev-two", "--no-restart").returncode == 0
+    token_file = f.tokens / "sa.token"
+    token_before = (token_file.read_bytes(), os.stat(token_file).st_mtime_ns)
+
+    def acct():
+        return next(a for a in f.cfg()["accounts"] if a["name"] == "sa")
+
+    def set_ok(*flags):
+        r = f.run("set-account", "sa", *flags, "--no-restart")
+        assert r.returncode == 0, (flags, r)
+        assert mode(f.config) == 0o640
+        return acct()
+
+    assert set_ok("--disable")["disabled"] is True
+    assert "disabled" not in set_ok("--enable")
+    assert set_ok("--priority", "3")["priority"] == 3
+    assert set_ok("--weight", "0.25")["weight"] == 0.25
+    assert set_ok("--weekly-cap", "0.5")["weekly_cap"] == 0.5
+    assert set_ok("--weekly-pacing")["weekly_pacing"] is True
+    assert set_ok("--pace-lookahead", "2d")["pace_lookahead"] == "2d"
+    assert "weekly_cap" not in set_ok("--no-weekly-cap")
+    assert "weekly_pacing" not in set_ok("--no-weekly-pacing")
+    assert "pace_lookahead" not in set_ok("--no-pace-lookahead")
+    # Several settings in one call, and the service is signalled unless --no-restart.
+    a = set_ok("--disable", "--weight", "2", "--weekly-cap", "1")
+    assert a["disabled"] is True and a["weight"] == 2 and a["weekly_cap"] == 1
+    set_ok("--enable")
+    f.reset_calls()
+    f.set_active(True)
+    r = f.run("set-account", "sa", "--priority", "5")
+    assert r.returncode in (0, 2), r
+    assert any(c.startswith("reload") for c in f.calls()), f.calls()
+    assert acct()["priority"] == 5
+    # Refusals exit 1 and leave config.json byte-identical.
+    before = f.config.read_bytes()
+    for flags, message in ((("sa", "--weight", "0"), "weight must be a number > 0"),
+                           (("sa", "--weight", "nan"), "weight must be a number > 0"),
+                           (("sa", "--weekly-cap", "1.5"), "weekly_cap must be a number from 0 to 1"),
+                           (("sa", "--pace-lookahead", "12x"), "pace_lookahead must be an integer and one unit"),
+                           (("sa", "--priority", "x"), "priority must be an integer"),
+                           (("ghost", "--disable"), "does not exist"),
+                           (("sa", "--private-to", "ghost"), "not registered"),
+                           (("sa",), "no setting given"),
+                           (("sa", "--disable", "--enable"), "not allowed with")):
+        r = f.run("set-account", *flags, "--no-restart")
+        assert r.returncode == 1 and message in r.stderr, (flags, r)
+        assert f.config.read_bytes() == before, flags
+    # private_to: a new list gets priority 1 only when there is none; --shared keeps priority.
+    a = set_ok("--private-to", "alice-laptop,dev-two")
+    assert a["private_to"] == ["alice-laptop", "dev-two"] and a["priority"] == 5
+    cfg = f.cfg()
+    del next(x for x in cfg["accounts"] if x["name"] == "sa")["priority"]
+    f.config.write_text(json.dumps(cfg))
+    assert set_ok("--private-to", "dev-two")["private_to"] == "dev-two"
+    assert acct()["priority"] == 1
+    a = set_ok("--shared")
+    assert "private_to" not in a and a["priority"] == 1
+    assert set_ok("--priority", "100")["priority"] == 100
+    assert (token_file.read_bytes(), os.stat(token_file).st_mtime_ns) == token_before
+    # status shows the settings, with defaults for absent keys.
+    set_ok("--weight", "2", "--weekly-cap", "0.5", "--weekly-pacing", "--pace-lookahead", "6h",
+           "--private-to", "alice-laptop")
+    report = json.loads(f.run("status", "--json").stdout)
+    row = next(x for x in report["accounts"] if x["name"] == "sa")
+    assert (row["weight"], row["weekly_cap"], row["weekly_pacing"], row["pace_lookahead"],
+            row["private_to"]) == (2, 0.5, True, "6h", "alice-laptop")
+    set_ok("--shared", "--no-weekly-cap", "--no-weekly-pacing", "--no-pace-lookahead")
+    set_ok("--weight", "1")
+    cfg = f.cfg()
+    del next(x for x in cfg["accounts"] if x["name"] == "sa")["weight"]
+    f.config.write_text(json.dumps(cfg))
+    report = json.loads(f.run("status", "--json").stdout)
+    row = next(x for x in report["accounts"] if x["name"] == "sa")
+    assert (row["weight"], row["weekly_cap"], row["weekly_pacing"], row["pace_lookahead"],
+            row["private_to"]) == (1, None, False, None, None)
+    human = f.run("status").stdout
+    assert "weight 1, weekly_cap none, weekly_pacing off, pace_lookahead default, private_to none" in human
+
+
 def main():
     f = Fixture()
     order = ["test_init_creates_empty_config_and_modes", "test_invalid_names_do_nothing",
@@ -635,7 +716,8 @@ def main():
              "test_status_has_no_secrets", "test_status_live_query_uses_header",
              "test_reload_is_confirmed_through_status",
              "test_rotate_rejections_do_not_mutate", "test_rotate_switches_after_stop_and_preserves_state",
-             "test_remove_token_and_setup_needed", "test_set_url_and_symlinked_config"]
+             "test_remove_token_and_setup_needed", "test_set_url_and_symlinked_config",
+             "test_set_account"]
     tests = [(n, globals()[n]) for n in order]  # the fixture is built up step by step
     assert sorted(order) == sorted(n for n, g in globals().items() if n.startswith("test_") and callable(g))
     try:

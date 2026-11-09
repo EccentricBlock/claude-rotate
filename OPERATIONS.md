@@ -115,6 +115,7 @@ validate, or does not answer, it says `NOT live` and exits 2.
 | Show service, accounts, devices, active account | `sudo claude-rotate-admin status` (`--json` for scripts) |
 | Add an account, or replace an existing account's token | `sudo claude-rotate-admin add-token NAME` |
 | Add an account reserved for one or more devices (comma list), written with priority 1 | `sudo claude-rotate-admin add-token NAME --private-to DEVICE[,DEVICE...]` |
+| Change an account's settings, any of `--disable`/`--enable`, `--priority N`, `--weight X`, `--weekly-cap F`/`--no-weekly-cap`, `--weekly-pacing`/`--no-weekly-pacing`, `--pace-lookahead 12h`/`--no-pace-lookahead`, `--private-to DEVICE[,DEVICE...]`/`--shared` (`--shared` leaves the `priority: 1` that `--private-to` wrote; `--priority 100` undoes it) | `sudo claude-rotate-admin set-account NAME --FLAG ...` |
 | Add a device and print its two `export` lines | `sudo claude-rotate-admin add-user NAME` |
 | Revoke a device (refused while it is the only owner of a private account) | `sudo claude-rotate-admin remove-user NAME` |
 | Remove an account and delete its token file | `sudo claude-rotate-admin remove-token NAME` |
@@ -133,8 +134,9 @@ within `reload_poll_s` seconds (5 by default).
 
 Manual edits remain possible with `sudoedit /etc/claude-rotate/config.json`
 followed by `sudo claude-rotate-admin activate`, which checks the JSON and the
-readiness rules before reloading. Supported manual settings include
-`"disabled": true` and `"priority"` on an account and the rotation policy keys.
+readiness rules before reloading. Per-account settings have `set-account`
+instead; manual edits cover the rotation policy keys and the other top-level
+settings.
 
 The service reloads `config.json` and the token files without a restart; the
 [README](README.md#reloading-the-configuration) lists what a reload covers. An

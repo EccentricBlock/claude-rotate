@@ -15,6 +15,7 @@ import fcntl
 import getpass
 import grp
 import json
+import math
 import os
 import pwd
 import re
@@ -651,6 +652,90 @@ def cmd_add_token(args) -> int:
         return activate(cfg, restart=not args.no_restart, what=what)
 
 
+def parse_number(text: str):
+    """An int when the text is one, else a float; None when it is neither or not finite."""
+    for kind in (int, float):
+        try:
+            value = kind(text)
+        except ValueError:
+            continue
+        return value if math.isfinite(value) else None
+    return None
+
+
+def set_account_changes(args) -> dict:
+    """The key changes the flags ask for, validated with rotator.py's rules and
+    wording: a value, or None to remove the key."""
+    name = args.name
+    changes = {}
+    if args.disable:
+        changes["disabled"] = True
+    if args.enable:
+        changes["disabled"] = None
+    if args.priority is not None:
+        try:
+            changes["priority"] = int(args.priority)
+        except ValueError:
+            raise Refused(f"account '{name}': priority must be an integer") from None
+    if args.weight is not None:
+        weight = parse_number(args.weight)
+        if weight is None or not weight > 0:
+            raise Refused(f"account '{name}': weight must be a number > 0")
+        changes["weight"] = weight
+    if args.weekly_cap is not None:
+        cap = parse_number(args.weekly_cap)
+        if cap is None or not 0 <= cap <= 1:
+            raise Refused(f"account '{name}': weekly_cap must be a number from 0 to 1")
+        changes["weekly_cap"] = cap
+    if args.no_weekly_cap:
+        changes["weekly_cap"] = None
+    if args.weekly_pacing:
+        changes["weekly_pacing"] = True
+    if args.no_weekly_pacing:
+        changes["weekly_pacing"] = None
+    if args.pace_lookahead is not None:
+        if not re.fullmatch(r"\d+[mhd]", args.pace_lookahead):
+            raise Refused(f"account '{name}': pace_lookahead must be an integer and "
+                          "one unit m, h or d, for example \"12h\"")
+        changes["pace_lookahead"] = args.pace_lookahead
+    if args.no_pace_lookahead:
+        changes["pace_lookahead"] = None
+    return changes
+
+
+def cmd_set_account(args) -> int:
+    validate_name(args.name, "account name")
+    for device in args.private_to or []:
+        validate_name(device, "device name")
+    if len(set(args.private_to or [])) != len(args.private_to or []):
+        raise Refused("--private-to lists a device twice")
+    changes = set_account_changes(args)
+    if not changes and args.private_to is None and not args.shared:
+        raise Refused("no setting given; nothing changed")
+    with AdminLock():
+        check_fixed_tree()
+        cfg = load_config()
+        acct = next((a for a in cfg["accounts"] if a["name"] == args.name), None)
+        if acct is None:
+            raise Refused(f"account '{args.name}' does not exist; nothing changed")
+        for device in args.private_to or []:
+            if device not in cfg["devices"]:
+                raise Refused(f"device '{device}' is not registered; "
+                              f"run: claude-rotate-admin add-user {device}")
+        for key, value in changes.items():
+            if value is None:
+                acct.pop(key, None)
+            else:
+                acct[key] = value
+        if args.private_to is not None:
+            set_private(acct, args.private_to)
+        if args.shared:
+            acct.pop("private_to", None)
+        write_config(cfg)
+        out(f"account '{args.name}' updated")
+        return activate(cfg, restart=not args.no_restart, what=f"settings for '{args.name}'")
+
+
 def print_device_block(cfg: dict, name: str, key: str):
     url = public_url(cfg)
     out(f"device '{name}' registered. On that machine set:")
@@ -912,6 +997,9 @@ def collect_status():
         util_5h, util_7d = effective_utilization(info, now) if isinstance(info, dict) else (0.0, 0.0)
         accounts.append({
             "name": acct["name"], "disabled": bool(acct.get("disabled")), "priority": acct.get("priority", 100),
+            "weight": acct.get("weight", 1), "weekly_cap": acct.get("weekly_cap"),
+            "weekly_pacing": acct.get("weekly_pacing", False), "pace_lookahead": acct.get("pace_lookahead"),
+            "private_to": acct.get("private_to"),
             "token_file": acct.get("token_file"), "token_file_present": status["present"],
             "token_file_bytes": status.get("bytes"), "token_file_mode": status.get("mode"),
             "util_5h": util_5h, "util_7d": util_7d,
@@ -987,7 +1075,13 @@ def cmd_status(args) -> int:
         token = ("token file present" + (f", {acct['token_file_bytes']} bytes, mode {acct['token_file_mode']}"
                                          if acct.get("token_file_bytes") is not None else "")
                  if acct["token_file_present"] else "token file MISSING")
-        out(f"  {acct['name']}: {token}; 5h {acct['util_5h']:.0%}, 7d {acct['util_7d']:.0%}; "
+        private = acct["private_to"]
+        private = ",".join(private) if isinstance(private, list) else private
+        out(f"  {acct['name']}: priority {acct['priority']}, weight {acct['weight']}, "
+            f"weekly_cap {acct['weekly_cap'] if acct['weekly_cap'] is not None else 'none'}, "
+            f"weekly_pacing {'on' if acct['weekly_pacing'] else 'off'}, "
+            f"pace_lookahead {acct['pace_lookahead'] or 'default'}, private_to {private or 'none'}")
+        out(f"    {token}; 5h {acct['util_5h']:.0%}, 7d {acct['util_7d']:.0%}; "
             f"last seen {fmt_time(acct['last_seen'])}; upstream status {acct['upstream_status'] or 'n/a'}"
             + (f" [{', '.join(flags)}]" if flags else ""))
     out("devices:")
@@ -1055,6 +1149,29 @@ def build_parser():
     p = add("remove-token", cmd_remove_token, "remove an account and delete its token file", aliases=("remove-account",))
     p.add_argument("name", metavar="NAME")
     p.add_argument("--no-restart", action="store_true")
+    p = add("set-account", cmd_set_account, "change an account's settings (not its token)")
+    p.add_argument("name", metavar="NAME")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--disable", action="store_true", help="set disabled: the account is never used")
+    g.add_argument("--enable", action="store_true", help="remove disabled")
+    p.add_argument("--priority", metavar="N", help="priority, an integer (default 100; lower is used first)")
+    p.add_argument("--weight", metavar="X", help="weight, a number > 0 (default 1)")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--weekly-cap", metavar="F", help="weekly cap, a number from 0 to 1")
+    g.add_argument("--no-weekly-cap", action="store_true", help="remove weekly_cap")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--weekly-pacing", action="store_true", help="set weekly_pacing: true")
+    g.add_argument("--no-weekly-pacing", action="store_true", help="remove weekly_pacing")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--pace-lookahead", metavar="D", help="an integer and one unit m, h or d, for example 12h")
+    g.add_argument("--no-pace-lookahead", action="store_true", help="remove pace_lookahead")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--private-to", metavar="DEVICE[,DEVICE...]", type=lambda v: v.split(","),
+                   help="reserve the account for these registered devices; writes priority 1 if it has none")
+    g.add_argument("--shared", action="store_true",
+                   help="remove private_to; priority stays as it is, so --priority 100 undoes the priority 1 "
+                        "that --private-to wrote")
+    p.add_argument("--no-restart", action="store_true", help="store only; do not signal the service (it still polls for changes)")
     add("set-url", cmd_set_url, "set public_url used in the add-user instructions").add_argument("url", metavar="URL")
     add("rotate", cmd_rotate, "make another account active (next eligible, or ACCOUNT); restarts the service").add_argument(
         "account", nargs="?", metavar="ACCOUNT")
