@@ -517,15 +517,12 @@ weekly window under `switch_threshold_7d`; a window past its reset counts as
   in the week the allowance is small, which leaves quota for chat use outside
   the proxy; it reaches the cap `pace_lookahead` before the weekly reset, so the
   last evening burns the account down to the cap. An account with neither key
-  is unchanged. Upgrade note: `weekly_cap` no longer ramps on its own. A config
-  that wants the ramp adds `weekly_pacing: true` to each capped account.
-  Upgrade note: the lookahead key was `cap_lookahead`. The old key now refuses
-  startup, so rename `cap_lookahead` to `pace_lookahead` in config.json before
-  upgrading.
-  An account at or over its allowance is
-  neither usable nor reserve, and it ranks after every other account in the
-  all-blocked fallback. If it is the active account it is left at once, with
-  no cooldown or margin, and the switch is logged as `weekly_cap`. A manual
+  is unchanged. Upgrade note: the lookahead key was `cap_lookahead`. The old
+  key now refuses startup, so rename `cap_lookahead` to `pace_lookahead` in
+  config.json before upgrading. An account at or over its allowance is neither
+  usable nor reserve, and it ranks after every other account in the all-blocked
+  fallback. If it is the active account it is left at once, with no cooldown or
+  margin, and the switch is logged as `weekly_cap`. A manual
   `claude-rotate-admin rotate` onto such an account is left on its next reply.
   With `weekly-pace`, a capped account's quota left is
   `weekly_cap − weekly utilization`.
@@ -889,9 +886,8 @@ those taken from other forks.
 **Rotation policy**
 
 - Fixed [doxaras/claude-rotate#3](https://github.com/doxaras/claude-rotate/issues/3): the all-blocked fallback and the hold-until-reset wait rank accounts by when they can serve again, and a rejected account is never treated as usable on a stale reading.
-- Added a per-account weekly pacing cap, `accounts[].weekly_cap` with `cap_lookahead`, so an account needed for other purposes, such as chat through the week, is not drained too quickly ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a)).
-- Split the weekly cap from weekly pacing: `accounts[].weekly_cap` is now a flat maximum, and the per-account `weekly_pacing: true` (default `false`) ramps the allowance through the week, up to `weekly_cap` or to 1.0 when no cap is set ([18a4c3a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/18a4c3a)). Upgrade note: `weekly_cap` no longer ramps on its own; a config that wants the ramp adds `weekly_pacing: true` to each capped account.
-- Renamed the lookahead setting `cap_lookahead` to `pace_lookahead`, top-level and per account, because it applies only with `weekly_pacing: true` ([00d659c](https://github.com/mrglrlgrlgrl/claude-rotate/commit/00d659c)). Upgrade note: the old key now refuses startup, so rename `cap_lookahead` to `pace_lookahead` in config.json before upgrading.
+- Added a per-account weekly cap, `accounts[].weekly_cap`: the fraction of its weekly window an account may use, a flat maximum, so an account needed for other purposes, such as chat through the week, keeps quota back ([5ad787a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/5ad787a), [18a4c3a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/18a4c3a)).
+- Added per-account weekly pacing, `accounts[].weekly_pacing: true` (default `false`): the account's weekly allowance ramps up through the week to `weekly_cap`, or to the full week when no cap is set, and reaches it `pace_lookahead` before the weekly reset, so the account is not drained early ([18a4c3a](https://github.com/mrglrlgrlgrl/claude-rotate/commit/18a4c3a), [00d659c](https://github.com/mrglrlgrlgrl/claude-rotate/commit/00d659c)).
 - `accounts[].private_to` names one or more devices that alone may use an account; within its priority tier they use it before the shared accounts. `--private-to` on `setup.sh add-account` and `claude-rotate-admin add-token` takes a comma list and writes `priority: 1` for a new account ([74d23ae](https://github.com/mrglrlgrlgrl/claude-rotate/commit/74d23ae), [3da39c2](https://github.com/mrglrlgrlgrl/claude-rotate/commit/3da39c2), [fec60f9](https://github.com/mrglrlgrlgrl/claude-rotate/commit/fec60f9), [af3fc70](https://github.com/mrglrlgrlgrl/claude-rotate/commit/af3fc70)).
 
 **Service and deployment**
