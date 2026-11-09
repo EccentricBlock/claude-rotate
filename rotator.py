@@ -282,7 +282,7 @@ def settings(cfg: dict) -> dict:
         "BAD_RECOVER_S": cfg.get("bad_recover_s", 600),
         "BAD_RECOVER_MAX_S": cfg.get("bad_recover_max_s", 86400),
         "PRICES": cfg.get("prices_per_mtok", DEFAULT_PRICES),
-        "ALERT_CFG": cfg.get("alerts", DEFAULT_ALERTS),
+        "ALERT_CFG": {**DEFAULT_ALERTS, **cfg.get("alerts", {})},
     }
 
 
@@ -955,10 +955,38 @@ async def refresh_idle_accounts() -> None:
                   file=sys.stderr)
 
 
+ALERT_SENT: dict = {}  # alert text -> when it was last posted to the webhook
+webhook_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+
+
+async def send_alert_webhook() -> None:
+    """POST each current panel alert to alerts.webhook_url, at most once an hour
+    per text. A failure is reported and not retried. The URL is a secret, so it
+    is never printed."""
+    url = ALERT_CFG.get("webhook_url")
+    if not isinstance(url, str) or not url:
+        return
+    now = time.time()
+    for text in [t for t, sent in ALERT_SENT.items() if now - sent >= 3600]:
+        del ALERT_SENT[text]
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    for alert in aggregate_audit()["alerts"]:
+        if alert["text"] in ALERT_SENT:
+            continue
+        ALERT_SENT[alert["text"]] = now
+        try:
+            r = await webhook_client.post(url, json={
+                "text": alert["text"], "level": alert["level"], "ts": stamp})
+            r.raise_for_status()
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
+            print(f"warning: alert webhook failed ({type(exc).__name__})", file=sys.stderr)
+
+
 async def refresh_loop() -> None:
     while True:
         if REFRESH_IDLE_S:
             await refresh_idle_accounts()
+        await send_alert_webhook()
         record_history(time.time())
         save_rollup()
         await asyncio.sleep(60)

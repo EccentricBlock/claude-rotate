@@ -348,7 +348,8 @@ rate-limit headers:
   N tokens/hour, expensive-model usage, account near the switch threshold;
   thresholds in `config.json`) sit in a banner above it. An account whose
   token upstream refused with a 401 in the last hour also raises a warning
-  naming it; the proxy does not rotate away from it.
+  naming it; the proxy does not rotate away from it. Set `alerts.webhook_url`
+  to also receive each alert as a JSON POST.
 - **Accounts**: live 5-hour and weekly meters (from Anthropic's own headers)
   with a tick at the switch threshold, reset countdowns, upstream status and
   the active account. Hover a reset countdown for the exact reset time in your
@@ -443,7 +444,8 @@ and `[DONE]`, not as a normal finish.
 | `refresh_idle_model` | model the idle refresh probes with (default `"claude-haiku-4-5"`). Set it when that model retires: a model the plan can't use answers 429 without usage headers, so the refresh learns nothing. |
 | `panel_tailnet` | `true` lets tailnet users open the panel without a device key, trusting the `Tailscale-User-Login` header from Tailscale Serve; requires a loopback `bind` (default false). See [SECURITY.md](SECURITY.md). |
 | `prices_per_mtok` | substring-matched `[input, output]` $ per MTok for the cost columns |
-| `alerts` | `device_tokens_per_hour`, `expensive_model_patterns`, `util_warn` |
+| `alerts` | `device_tokens_per_hour`, `expensive_model_patterns`, `util_warn`, `webhook_url`. An unset key keeps its default, so `{"webhook_url": "..."}` alone is valid. |
+| `alerts.webhook_url` | optional URL (default unset = off). Once a minute the proxy POSTs each current panel alert as JSON `{"text", "level", "ts"}` to it, each alert at most once an hour, with a 5 s timeout and no retry; a failure prints a warning. The URL is a secret: see [SECURITY.md](SECURITY.md). |
 
 ### Reloading the configuration
 

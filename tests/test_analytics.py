@@ -1,10 +1,15 @@
 """Offline tests for claude-rotate analytics: SSE usage capture, pricing,
 cost math, and aggregate_audit rollups/alerts/roster."""
+import asyncio
+import contextlib
+import io
 import json
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import rotator as R
@@ -119,6 +124,71 @@ check("recent 401s give one warn alert naming the account, with the count",
                        "hour; renew it with add-account/add-token"])
 check("a 401 older than an hour and a 403 give none",
       not any(t.startswith("b:") for t in token_alerts))
+
+# --- alerts.webhook_url: partial alerts object, one POST per alert per hour ---
+HOOK = "http://hooks.test/secret-path"
+R.ALERT_CFG = R.settings({"devices": {}, "accounts": [], "alerts": {"webhook_url": HOOK}})["ALERT_CFG"]
+check("an alerts object holding only webhook_url keeps the default rules",
+      R.ALERT_CFG == {**R.DEFAULT_ALERTS, "webhook_url": HOOK})
+check("...and the default rules still alert (no KeyError)",
+      any("ci-box consumed 6,000,010 tokens" in x["text"] for x in R.aggregate_audit()["alerts"]))
+full = {"device_tokens_per_hour": 1, "expensive_model_patterns": ["x"], "util_warn": 0.5}
+check("a full alerts object behaves as before",
+      R.settings({"devices": {}, "accounts": [], "alerts": full})["ALERT_CFG"] == full)
+
+posted = []
+
+
+def receiver(request):
+    posted.append(json.loads(request.content))
+    return httpx.Response(200)
+
+
+def send(handler):
+    R.webhook_client = httpx.AsyncClient(transport=httpx.MockTransport(handler),
+                                         timeout=httpx.Timeout(5.0))
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        asyncio.run(R.send_alert_webhook())
+    return err.getvalue()
+
+
+R.ALERT_SENT.clear()
+now_alerts = [x["text"] for x in R.aggregate_audit()["alerts"]]
+send(receiver)
+check("each active alert is posted once, with text, level and ts",
+      sorted(p["text"] for p in posted) == sorted(now_alerts) and len(posted) >= 2
+      and all(set(p) == {"text", "level", "ts"} for p in posted)
+      and {p["level"] for p in posted} == {"warn", "info"})
+n = len(posted)
+send(receiver)
+check("a second evaluation within the hour sends nothing", len(posted) == n)
+for t in R.ALERT_SENT:
+    R.ALERT_SENT[t] -= 3601
+send(receiver)
+check("an alert is sent again after an hour", len(posted) == 2 * n)
+R.ALERT_CFG = {k: v for k, v in R.ALERT_CFG.items() if k != "webhook_url"}
+R.ALERT_SENT.clear()
+send(receiver)
+check("with no webhook_url nothing is sent", len(posted) == 2 * n)
+
+# Only the 401 alert is left active, so one failure prints one warning. The
+# unparsable audit line above set the partial-history alert; clear it.
+R._AUDIT_CACHE["limited_until"] = 0
+R.ALERT_CFG = {"device_tokens_per_hour": 10**12, "expensive_model_patterns": [],
+               "util_warn": 2.0, "webhook_url": HOOK}
+
+
+def timing_out(request):
+    raise httpx.ReadTimeout("slow", request=request)
+
+
+for name, handler in (("a 500", lambda request: httpx.Response(500)), ("a timeout", timing_out)):
+    R.ALERT_SENT.clear()
+    err = send(handler)
+    check(f"{name} prints one warning without the URL and does not raise",
+          err.count("warning: alert webhook failed") == 1 and "secret-path" not in err)
+    check(f"{name} is not retried within the hour", send(handler) == "")
 
 devs = agg["devices"]
 check("roster covers idle device too", "idle-dev" in devs)

@@ -28,6 +28,12 @@ itself can also send it, and so read the dashboard without a key. The dashboard 
 account and device names, the last 4 characters of device keys and per-device
 usage; never tokens or message content. Proxy endpoints still require a device key.
 
+`alerts.webhook_url` in `config.json` is a secret: a webhook URL carries its
+own credential, so anyone holding it can post to that channel. Keep it in the
+config file with the tokens, at mode 0600, and never in a repository or log.
+The proxy does not print it. It sends alert texts (account and device names,
+token counts) to that URL once an hour at most per alert.
+
 Run the service as a dedicated unprivileged user. Keep the installation directory
 and backups private. `setup.sh` enforces mode 0600 for configuration and tokens,
 and 0700 for the token directory. A token file or configuration manually edited
